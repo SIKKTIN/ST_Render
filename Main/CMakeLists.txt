@@ -1,83 +1,8 @@
 # Main/CMakeLists.txt
-# 主程序和测试
-
-# 可执行文件
-add_executable(ST_Render
-    test_main.cpp
-    test_math.cpp
-    test_buffer.cpp
-    test_geometry.cpp
-    test_transform.cpp
-    test_camera.cpp
-    test_pipeline.cpp
-    test_renderer.cpp
-    test_sdl_window.cpp
-)
-
-# 链接库
-target_link_libraries(ST_Render PRIVATE Math Buffer Geometry Transform Camera Pipeline Renderer)
-
-# 链接 SDL2
-target_link_libraries(ST_Render PRIVATE
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-)
-
-# 复制 SDL2.dll 到输出目录 (vcpkg 会自动处理，这里仅作为备用)
-if(WIN32)
-    add_custom_command(TARGET ST_Render POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL2::SDL2>
-            $<TARGET_FILE_DIR:ST_Render>
-        COMMENT "Copying SDL2.dll"
-        VERBATIM
-    )
-endif()
-
-# SDL 窗口测试程序
-add_executable(ST_Render_SDL
-    test_sdl_main.cpp
-    test_sdl_window.cpp
-)
-
-target_link_libraries(ST_Render_SDL PRIVATE Math Buffer Geometry Transform Camera Pipeline Renderer)
-
-target_link_libraries(ST_Render_SDL PRIVATE
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-)
-
-if(WIN32)
-    add_custom_command(TARGET ST_Render_SDL POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL2::SDL2>
-            $<TARGET_FILE_DIR:ST_Render_SDL>
-        COMMENT "Copying SDL2.dll"
-        VERBATIM
-    )
-endif()
-
-# SDL 圆圈测试
-add_executable(ST_Render_SDL_Circle
-    test_sdl_circle.cpp
-)
-
-target_link_libraries(ST_Render_SDL_Circle PRIVATE
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-)
-
-if(WIN32)
-    add_custom_command(TARGET ST_Render_SDL_Circle POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL2::SDL2>
-            $<TARGET_FILE_DIR:ST_Render_SDL_Circle>
-        COMMENT "Copying SDL2.dll"
-        VERBATIM
-    )
-endif()
+# 主程序和测试管理器（ImGui）
 
 # ST_Render_Manager (Dear ImGui)
+# 主入口：test_manager_main.cpp 负责启动 TestManager + ImGui 框架
 add_executable(ST_Render_Manager
     TestManager.cpp
     test_manager_main.cpp
