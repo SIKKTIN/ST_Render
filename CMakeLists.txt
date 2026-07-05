@@ -1,8 +1,8 @@
-# CMakeLists.txt - ST Render 软件渲染器项目
+# CMakeLists.txt - ST_Render 软件渲染器项目
 cmake_minimum_required(VERSION 3.16)
 
 # 项目配置
-project(ST_Render VERSION 0.1.0 LANGUAGES CXX)
+project(ST_Render VERSION 0.2.0 LANGUAGES CXX)
 
 # C++ 标准
 set(CMAKE_CXX_STANDARD 17)
@@ -28,19 +28,8 @@ find_package(nlohmann_json CONFIG REQUIRED)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
-# 包含子目录
-add_subdirectory(Math)
-add_subdirectory(Texture)
-add_subdirectory(Buffer)
-add_subdirectory(Geometry)
-add_subdirectory(Transform)
-add_subdirectory(Data)
-add_subdirectory(Camera)
-add_subdirectory(Pipeline)
-add_subdirectory(FucModule/Music)
-add_subdirectory(Renderer)
-add_subdirectory(Editor)
-add_subdirectory(Main)
+# src/ 根作为公共 include 起点（所有 src 下的目标都可以 #include "core/math/Vector3.hpp"）
+add_subdirectory(src)
 
 # 打印配置信息（可选）
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
