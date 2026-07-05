@@ -10,6 +10,7 @@ add_executable(ST_Render_Manager
     TestModule_Rasterizer.cpp
     TestModule_VertexShader.cpp
     TestModule_2D_Scene.cpp
+    TestModule_3DRender.cpp
     TestModule_Sprite2D.cpp
     TestModule_Texture.cpp
     TestModule_Music.cpp

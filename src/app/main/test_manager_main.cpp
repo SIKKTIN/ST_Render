@@ -12,6 +12,7 @@
 #include "TestModule_Rasterizer.hpp"
 #include "TestModule_VertexShader.hpp"
 #include "TestModule_2D_Scene.hpp"
+#include "TestModule_3DRender.hpp"
 #include "TestModule_Texture.hpp"
 #include "TestModule_Music.hpp"
 #include "TestModule_DragWindow.hpp"
@@ -57,6 +58,7 @@ int main(int argc, char* argv[]) {
     modules.push_back(new TestModule_Rasterizer());
     modules.push_back(new TestModule_VertexShader());
     modules.push_back(new TestModule_2D_Scene());
+    modules.push_back(new TestModule_3DRender());
     modules.push_back(new TestModule_Sprite2D());
     modules.push_back(new TestModule_DragWindow());
     modules.push_back(new TestModule_Texture());
