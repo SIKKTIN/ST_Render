@@ -21,8 +21,30 @@
 #include "engine/editor/TextureManager.hpp"
 #include "engine/editor/AudioManager.hpp"
 
+// ---------------------------------------------------------------------------
+// Layout constants (window size, panel widths, canvas size).
+// Kept here so event-routing code can use the same values the render uses.
+// ---------------------------------------------------------------------------
+namespace Layout {
+    constexpr int   WINDOW_W          = 1280;
+    constexpr int   WINDOW_H          = 720;
+    constexpr float MENU_BAR_H        = 24.0f;
+    constexpr float LEFT_PANEL_W      = 220.0f;
+    constexpr float CREATE_PANEL_W    = 200.0f;
+    constexpr float RIGHT_PANEL_W     = 220.0f;
+    constexpr float CREATE_PANEL_MIN  = 80.0f;
+    constexpr float CREATE_PANEL_MAX  = 400.0f;
+    constexpr float TOP_AREA_H        = 550.0f;     // controls panel height
+    constexpr int   CANVAS_W          = 640;        // render-target size
+    constexpr int   CANVAS_H          = 480;        // render-target size
+    constexpr int   SPLITTER_HALF_W   = 4;          // vertical splitter strip width / 2
+    constexpr int   CANVAS_Y0         = 24;         // = (int)MENU_BAR_H; canvas screen Y start
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "=== ST Render - Test Manager ===" << std::endl;
+
+    enum class Theme { Dark, Light };
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
@@ -36,7 +58,7 @@ int main(int argc, char* argv[]) {
         "ST Render - Test Manager",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        1280, 720,
+        Layout::WINDOW_W, Layout::WINDOW_H,
         SDL_WINDOW_SHOWN
     );
     if (!window) {
@@ -70,7 +92,9 @@ int main(int argc, char* argv[]) {
     int selectedModule = 0;
     std::string consoleOutput;
     float consoleHeight = 120.0f;
-    float createObjPanelW = 200.0f;
+    float createObjPanelW = Layout::CREATE_PANEL_W;
+    float leftPanelW      = Layout::LEFT_PANEL_W;
+    float rightPanelW     = Layout::RIGHT_PANEL_W;
     bool draggingSplitter = false;
     bool draggingCreateSplitter = false;
     int mouseX = 0, mouseY = 0;
@@ -79,13 +103,11 @@ int main(int argc, char* argv[]) {
     int canvasMinX = 0, canvasMinY = 0;
     int canvasMaxX = 0, canvasMaxY = 0;
 
-    constexpr int CANVAS_W = 640;
-    constexpr int CANVAS_H = 480;
     SDL_Texture* canvas = SDL_CreateTexture(
         renderer,
         SDL_PIXELFORMAT_RGBA32,
         SDL_TEXTUREACCESS_TARGET,
-        CANVAS_W, CANVAS_H
+        Layout::CANVAS_W, Layout::CANVAS_H
     );
 
     auto runModule = [&](int index, bool rerender = true) {
@@ -94,7 +116,7 @@ int main(int argc, char* argv[]) {
         modules[index]->runConsole(consoleOutput);
         if (rerender) {
             SDL_SetRenderTarget(renderer, canvas);
-            modules[index]->render(renderer, CANVAS_W, CANVAS_H);
+            modules[index]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
         }
     };
@@ -102,7 +124,26 @@ int main(int argc, char* argv[]) {
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+
+    auto applyTheme = [](Theme t) {
+        if (t == Theme::Dark) {
+            ImGui::StyleColorsDark();
+            ImGui::GetStyle().Colors[ImGuiCol_MenuBarBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_WindowBg]  = ImVec4(0.06f, 0.06f, 0.07f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_Text]      = ImVec4(0.90f, 0.90f, 0.92f, 1.0f);
+        } else {
+            ImGui::StyleColorsLight();
+            ImGui::GetStyle().Colors[ImGuiCol_MenuBarBg] = ImVec4(0.88f, 0.88f, 0.90f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_WindowBg]  = ImVec4(0.96f, 0.96f, 0.97f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_Text]      = ImVec4(0.10f, 0.10f, 0.12f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_Border]    = ImVec4(0.60f, 0.60f, 0.65f, 1.0f);
+            ImGui::GetStyle().Colors[ImGuiCol_Separator] = ImVec4(0.65f, 0.65f, 0.70f, 1.0f);
+        }
+    };
+
+    Theme currentTheme = Theme::Dark;
+    applyTheme(currentTheme);
+
     ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer2_Init(renderer);
 
@@ -140,6 +181,15 @@ int main(int argc, char* argv[]) {
                                 event.button.y >= canvasMinY && event.button.y < canvasMaxY);
                 }
                 if (inCanvas) {
+                    // Normalize screen-Image coords to render-target coords.
+                    // Modules (e.g. TestModule_2D_Scene::pickObject3D, onWheel)
+                    // expect render-target space (Layout::CANVAS_W × CANVAS_H).
+                    int screenW = canvasMaxX - canvasMinX;
+                    int screenH = canvasMaxY - canvasMinY;
+                    if (screenW > 0 && screenH > 0) {
+                        cx = cx * Layout::CANVAS_W / screenW;
+                        cy = cy * Layout::CANVAS_H / screenH;
+                    }
                     if (event.type == SDL_MOUSEMOTION) {
                         mouseX = event.motion.x;
                         mouseY = event.motion.y;
@@ -180,22 +230,30 @@ int main(int argc, char* argv[]) {
                 mouseX = wx;
                 mouseY = wy;
 
-                int canvasX0 = 220 + 200; // leftPanelW + createObjPanelW
-                int canvasW = 1280 - 220 - 200 - 220;
-                int canvasH = CANVAS_H;
-                bool inCanvas = (wx >= canvasX0 && wx < canvasX0 + canvasW && wy >= 0 && wy < canvasH);
+                // In-canvas test uses the actual on-screen Image rect (recorded during
+                // last ImGui render), NOT Layout::CANVAS_H -- the latter would have
+                // (incorrectly) included the console area as part of the canvas.
+                bool inCanvas = (canvasMaxX > canvasMinX && canvasMaxY > canvasMinY &&
+                                 wx >= canvasMinX && wx < canvasMaxX &&
+                                 wy >= canvasMinY && wy < canvasMaxY);
 
                 if (inCanvas && selectedModule >= 0 && selectedModule < (int)modules.size()) {
-                    int cx = wx - canvasX0;
-                    int cy = wy;
+                    // Modules expect render-target coordinates (Layout::CANVAS_W × CANVAS_H).
+                    // The on-screen Image rect may differ from the render-target size
+                    // (Y differs whenever consoleHeight != 0; X coincides by current
+                    // layout math but we still normalize both for safety).
+                    int screenW = canvasMaxX - canvasMinX;
+                    int screenH = canvasMaxY - canvasMinY;
+                    int cx = (wx - canvasMinX) * Layout::CANVAS_W / screenW;
+                    int cy = (wy - canvasMinY) * Layout::CANVAS_H / screenH;
                     modules[selectedModule]->onWheel(
                         (float)event.wheel.x, (float)event.wheel.y,
-                        cx, cy, canvasW, canvasH
+                        cx, cy, Layout::CANVAS_W, Layout::CANVAS_H
                     );
                 } else {
                     modules[selectedModule]->onWheel(
                         (float)event.wheel.x, (float)event.wheel.y,
-                        mouseX, mouseY, CANVAS_W, canvasH
+                        mouseX, mouseY, Layout::CANVAS_W, Layout::CANVAS_H
                     );
                 }
             }
@@ -208,7 +266,7 @@ int main(int argc, char* argv[]) {
             last = now;
             modules[selectedModule]->update(dt);
             SDL_SetRenderTarget(renderer, canvas);
-            modules[selectedModule]->render(renderer, CANVAS_W, CANVAS_H);
+            modules[selectedModule]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
             runModule(selectedModule, false);
         }
@@ -217,14 +275,60 @@ int main(int argc, char* argv[]) {
         ImGui_ImplSDLRenderer2_NewFrame();
         ImGui::NewFrame();
 
-        float leftPanelW = 220.0f;
-        float rightPanelW = 220.0f;
-        float topAreaH = 550.0f;
+        float topAreaH = Layout::TOP_AREA_H;
+
+        // Top menu bar (File / Edit / View / Help). Sits above all panels;
+        // all panels below are pushed down by the *actual* menu bar height,
+        // queried from ImGui after rendering, so they sit flush against the
+        // menu bar (no gap) and stay correct if the theme changes the font
+        // size or frame padding.
+        float menuBarH = Layout::MENU_BAR_H; // refined to true height after EndMainMenuBar()
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                ImGui::MenuItem("Open Scene...", "Ctrl+O", false, false);
+                ImGui::MenuItem("Save Scene", "Ctrl+S", false, false);
+                ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, false);
+                ImGui::Separator();
+                if (ImGui::MenuItem("Exit", "Alt+F4")) { running = false; }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Edit")) {
+                ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
+                ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
+                ImGui::Separator();
+                ImGui::MenuItem("Cut",   "Ctrl+X", false, false);
+                ImGui::MenuItem("Copy",  "Ctrl+C", false, false);
+                ImGui::MenuItem("Paste", "Ctrl+V", false, false);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("View")) {
+                if (ImGui::MenuItem("Reset Layout")) {
+                    leftPanelW      = Layout::LEFT_PANEL_W;
+                    rightPanelW     = Layout::RIGHT_PANEL_W;
+                    createObjPanelW = Layout::CREATE_PANEL_W;
+                    consoleHeight   = 120.0f;
+                }
+                ImGui::Separator();
+                ImGui::TextDisabled("Color Theme");
+                if (ImGui::MenuItem("Dark",  nullptr, currentTheme == Theme::Dark))  { currentTheme = Theme::Dark;  applyTheme(currentTheme); }
+                if (ImGui::MenuItem("Light", nullptr, currentTheme == Theme::Light)) { currentTheme = Theme::Light; applyTheme(currentTheme); }
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Help")) {
+                ImGui::MenuItem("Documentation...", nullptr, false, false);
+                ImGui::MenuItem("About ST Render...", nullptr, false, false);
+                ImGui::EndMenu();
+            }
+            menuBarH = ImGui::GetFrameHeight(); // actual rendered menu bar height
+            ImGui::EndMainMenuBar();
+        }
+
+        float windowH = (float)Layout::WINDOW_H - menuBarH;
 
         // Left panel - Test list
         {
-            ImGui::SetNextWindowPos(ImVec2(0, 0));
-            ImGui::SetNextWindowSize(ImVec2(leftPanelW, 720));
+            ImGui::SetNextWindowPos(ImVec2(0, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(leftPanelW, windowH));
             ImGui::Begin("Tests", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -243,8 +347,8 @@ int main(int argc, char* argv[]) {
 
         // Right panel - Controls
         {
-            ImGui::SetNextWindowPos(ImVec2(1280 - rightPanelW, 0));
-            ImGui::SetNextWindowSize(ImVec2(rightPanelW, topAreaH));
+            ImGui::SetNextWindowPos(ImVec2((float)Layout::WINDOW_W - rightPanelW, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(rightPanelW, topAreaH - menuBarH));
             ImGui::Begin("Controls", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -273,8 +377,8 @@ int main(int argc, char* argv[]) {
 
         // Create Object panel (left of canvas, above console)
         {
-            ImGui::SetNextWindowPos(ImVec2(leftPanelW, 0));
-            ImGui::SetNextWindowSize(ImVec2(createObjPanelW, 720));
+            ImGui::SetNextWindowPos(ImVec2(leftPanelW, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(createObjPanelW, windowH));
             ImGui::Begin("Create Object", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -287,9 +391,9 @@ int main(int argc, char* argv[]) {
 
         // Canvas + Console (with splitter)
         {
-            float canvasW = 1280.0f - leftPanelW - createObjPanelW - rightPanelW;
-            ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW, 0));
-            ImGui::SetNextWindowSize(ImVec2(canvasW, 720));
+            float canvasW = (float)Layout::WINDOW_W - leftPanelW - createObjPanelW - rightPanelW;
+            ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(canvasW, windowH));
             ImGui::Begin("Output", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -349,19 +453,19 @@ int main(int argc, char* argv[]) {
 
         // Vertical splitter (on top of everything)
         {
-            ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW - 4, 0));
-            ImGui::SetNextWindowSize(ImVec2(8, 720));
+            ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW - Layout::SPLITTER_HALF_W, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, windowH));
             ImGui::Begin("##VSplitter", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                 ImGuiWindowFlags_NoBackground);
 
-            ImGui::InvisibleButton("##VSplitterBtn", ImVec2(8, 720));
+            ImGui::InvisibleButton("##VSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, windowH));
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 wp = ImGui::GetWindowPos();
             ImU32 col = IM_COL32(55, 55, 55, 255);
             if (ImGui::IsItemHovered() || draggingCreateSplitter) col = IM_COL32(80, 130, 255, 255);
-            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 8, wp.y + 720), col);
+            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + windowH), col);
 
             if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
             if (draggingCreateSplitter) {
@@ -370,8 +474,8 @@ int main(int argc, char* argv[]) {
                     draggingCreateSplitter = false;
                 } else {
                     createObjPanelW += ImGui::GetIO().MouseDelta.x;
-                    if (createObjPanelW < 80.0f) createObjPanelW = 80.0f;
-                    if (createObjPanelW > 400.0f) createObjPanelW = 400.0f;
+                    if (createObjPanelW < Layout::CREATE_PANEL_MIN) createObjPanelW = Layout::CREATE_PANEL_MIN;
+                    if (createObjPanelW > Layout::CREATE_PANEL_MAX) createObjPanelW = Layout::CREATE_PANEL_MAX;
                 }
             } else if (ImGui::IsItemClicked(0)) {
                 draggingCreateSplitter = true;
@@ -381,15 +485,19 @@ int main(int argc, char* argv[]) {
         }
 
         ImGui::Render();
-        SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
         SDL_RenderClear(renderer);
+        if (currentTheme == Theme::Light) {
+            SDL_SetRenderDrawColor(renderer, 245, 245, 247, 255);
+        } else {
+            SDL_SetRenderDrawColor(renderer, 30, 30, 30, 255);
+        }
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
 
         if (modules[selectedModule]->needsRerender) {
             modules[selectedModule]->needsRerender = false;
             SDL_SetRenderTarget(renderer, canvas);
-            modules[selectedModule]->render(renderer, CANVAS_W, CANVAS_H);
+            modules[selectedModule]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
         }
     }
