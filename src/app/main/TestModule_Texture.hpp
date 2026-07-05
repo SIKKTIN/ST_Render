@@ -2,7 +2,7 @@
 
 #include <SDL2/SDL.h>
 #include <imgui.h>
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/buffer/FrameBuffer.hpp"
 #include "renderer/buffer/DepthBuffer.hpp"
 #include "renderer/buffer/Texture2D.hpp"
@@ -21,7 +21,7 @@ struct ScannedTexture {
     std::string fullPath;
 };
 
-class TestModule_Texture : public ITestModule {
+class TestModule_Texture : public IModule {
 public:
     TestModule_Texture();
     ~TestModule_Texture();

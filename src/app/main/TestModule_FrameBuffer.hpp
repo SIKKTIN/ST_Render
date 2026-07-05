@@ -1,10 +1,10 @@
 ﻿#pragma once
 
 #include <string>
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/buffer/FrameBuffer.hpp"
 
-class TestModule_FrameBuffer : public ITestModule {
+class TestModule_FrameBuffer : public IModule {
 public:
     TestModule_FrameBuffer();
     ~TestModule_FrameBuffer();

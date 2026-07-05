@@ -1,9 +1,9 @@
 ﻿#pragma once
 
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include <imgui.h>
 
-class TestModule_DragWindow : public ITestModule {
+class TestModule_DragWindow : public IModule {
 public:
     TestModule_DragWindow() : m_showWin1(false), m_showWin2(false) {}
 

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "engine/editor/Sprite2D.hpp"
 #include "engine/editor/GameObject.hpp"
 #include "engine/editor/Sprite2DUI.hpp"
@@ -19,7 +19,7 @@ struct SpawnEntry {
     SpawnType type;
 };
 
-class TestModule_Sprite2D : public ITestModule {
+class TestModule_Sprite2D : public IModule {
 public:
     TestModule_Sprite2D();
     ~TestModule_Sprite2D();

@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/pipeline/VertexShader.hpp"
 #include "renderer/pipeline/Rasterizer.hpp"
 #include "renderer/geometry/Mesh.hpp"
@@ -8,7 +8,7 @@
 #include "renderer/buffer/DepthBuffer.hpp"
 #include "core/math/Matrix4x4.hpp"
 
-class TestModule_VertexShader : public ITestModule {
+class TestModule_VertexShader : public IModule {
 public:
     TestModule_VertexShader();
     ~TestModule_VertexShader();

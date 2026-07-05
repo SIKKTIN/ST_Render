@@ -5,7 +5,7 @@
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "TestModule_Circle.hpp"
 #include "TestModule_Rectangle.hpp"
 #include "TestModule_FrameBuffer.hpp"
@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<ITestModule*> modules;
+    std::vector<IModule*> modules;
     modules.push_back(new TestModule_FrameBuffer());
     modules.push_back(new TestModule_Rasterizer());
     modules.push_back(new TestModule_VertexShader());
@@ -252,7 +252,7 @@ int main(int argc, char* argv[]) {
 
             static int viewportMode_local = 0;
             if (selectedModule >= 0 && selectedModule < (int)modules.size()) {
-                ITestModule* mod = modules[selectedModule];
+                IModule* mod = modules[selectedModule];
                 if (auto* scene2d = dynamic_cast<TestModule_2D_Scene*>(mod)) {
                     viewportMode_local = scene2d->getViewportMode();
                 } else {

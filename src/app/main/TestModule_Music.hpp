@@ -1,10 +1,10 @@
 ﻿#pragma once
 
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include <SDL2/SDL.h>
 #include <string>
 
-class TestModule_Music : public ITestModule {
+class TestModule_Music : public IModule {
 public:
     TestModule_Music();
     ~TestModule_Music();

@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include <SDL2/SDL.h>
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/buffer/FrameBuffer.hpp"
 #include "renderer/buffer/DepthBuffer.hpp"
 #include "renderer/pipeline/VertexShader.hpp"
@@ -22,7 +22,7 @@
 #include <string>
 #include <unordered_map>
 
-class TestModule_2D_Scene : public ITestModule {
+class TestModule_2D_Scene : public IModule {
 public:
     TestModule_2D_Scene();
     ~TestModule_2D_Scene();

@@ -1,7 +1,7 @@
-﻿#include "ITestModule.hpp"
+﻿#include "app/module/IModule.hpp"
 #include <SDL2/SDL.h>
 
-class TestModule_Rectangle : public ITestModule {
+class TestModule_Rectangle : public IModule {
 public:
     const char* getName() const override { return "SDL Rectangle"; }
     bool hasConsoleOutput() const override { return true; }

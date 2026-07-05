@@ -1,11 +1,11 @@
 ﻿#pragma once
 
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/renderer/Renderer.hpp"
 #include "renderer/buffer/FrameBuffer.hpp"
 #include "renderer/pipeline/Rasterizer.hpp"
 
-class TestModule_Rasterizer : public ITestModule {
+class TestModule_Rasterizer : public IModule {
 public:
     TestModule_Rasterizer();
     ~TestModule_Rasterizer();

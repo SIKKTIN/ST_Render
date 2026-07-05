@@ -2,9 +2,9 @@
 
 #include <string>
 
-class ITestModule {
+class IModule {
 public:
-    virtual ~ITestModule() = default;
+    virtual ~IModule() = default;
 
     virtual const char* getName() const = 0;
     virtual bool hasRenderOutput() const { return true; }

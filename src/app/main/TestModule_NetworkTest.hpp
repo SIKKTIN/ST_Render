@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include <SDL2/SDL.h>
-#include "ITestModule.hpp"
+#include "app/module/IModule.hpp"
 #include "renderer/buffer/FrameBuffer.hpp"
 #include "renderer/buffer/DepthBuffer.hpp"
 #include "renderer/pipeline/VertexShader.hpp"
@@ -9,7 +9,7 @@
 #include "core/math/Matrix4x4.hpp"
 #include "engine/editor/NetWork/NetworkDiscovery.hpp"
 
-class TestModule_NetworkTest : public ITestModule {
+class TestModule_NetworkTest : public IModule {
 public:
     TestModule_NetworkTest();
     ~TestModule_NetworkTest();
