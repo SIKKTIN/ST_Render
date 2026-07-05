@@ -1,0 +1,200 @@
+﻿// dear imgui: Renderer Backend for SDL_Renderer for SDL2 (Requires: SDL 2.0.17+)
+#ifndef IMGUI_DISABLE
+#include "imgui.h"
+#include "imgui_impl_sdlrenderer2.h"
+#include <cstdint>
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wsign-conversion"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+
+#include <SDL2/SDL.h>
+
+#if !SDL_VERSION_ATLEAST(2,0,17)
+#error This backend requires SDL 2.0.17+
+#endif
+
+struct ImGui_ImplSDLRenderer2_Data {
+    SDL_Renderer* Renderer = nullptr;
+};
+
+static ImGui_ImplSDLRenderer2_Data* ImGui_ImplSDLRenderer2_GetBackendData() {
+    return ImGui::GetCurrentContext() ? (ImGui_ImplSDLRenderer2_Data*)ImGui::GetIO().BackendRendererUserData : nullptr;
+}
+
+static void ImGui_ImplSDLRenderer2_SetupRenderState(SDL_Renderer* renderer) {
+    SDL_RenderSetViewport(renderer, nullptr);
+    SDL_RenderSetClipRect(renderer, nullptr);
+}
+
+void ImGui_ImplSDLRenderer2_NewFrame() {
+    ImGui_ImplSDLRenderer2_Data* bd = ImGui_ImplSDLRenderer2_GetBackendData();
+    IM_ASSERT(bd != nullptr && "Context or backend not initialized!");
+}
+
+static void ImGui_ImplSDLRenderer2_DrawCallback_ResetRenderState(const ImDrawList*, const ImDrawCmd*) {}
+
+void ImGui_ImplSDLRenderer2_RenderDrawData(ImDrawData* draw_data, SDL_Renderer* renderer) {
+    float rsx = 1.0f, rsy = 1.0f;
+    SDL_RenderGetScale(renderer, &rsx, &rsy);
+    ImVec2 render_scale;
+    render_scale.x = (rsx == 1.0f) ? draw_data->FramebufferScale.x : 1.0f;
+    render_scale.y = (rsy == 1.0f) ? draw_data->FramebufferScale.y : 1.0f;
+
+    int fb_width = (int)(draw_data->DisplaySize.x * render_scale.x);
+    int fb_height = (int)(draw_data->DisplaySize.y * render_scale.y);
+    if (fb_width == 0 || fb_height == 0) return;
+
+    if (draw_data->Textures != nullptr) {
+        for (ImTextureData* tex : *draw_data->Textures) {
+            if (tex->Status != ImTextureStatus_OK) {
+                if (tex->Status == ImTextureStatus_WantCreate) {
+                    IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
+                    IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
+                    SDL_Texture* sdl_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
+                        SDL_TEXTUREACCESS_STATIC, tex->Width, tex->Height);
+                    IM_ASSERT(sdl_texture != nullptr);
+                    SDL_UpdateTexture(sdl_texture, nullptr, tex->GetPixels(), tex->GetPitch());
+                    SDL_SetTextureBlendMode(sdl_texture, SDL_BLENDMODE_BLEND);
+                    SDL_SetTextureScaleMode(sdl_texture, SDL_ScaleModeLinear);
+                    tex->SetTexID((ImTextureID)(intptr_t)sdl_texture);
+                    tex->SetStatus(ImTextureStatus_OK);
+                } else if (tex->Status == ImTextureStatus_WantUpdates) {
+                    SDL_Texture* sdl_texture = (SDL_Texture*)(intptr_t)tex->TexID;
+                    for (ImTextureRect& r : tex->Updates) {
+                        SDL_Rect sdl_r = { r.x, r.y, r.w, r.h };
+                        SDL_UpdateTexture(sdl_texture, &sdl_r, tex->GetPixelsAt(r.x, r.y), tex->GetPitch());
+                    }
+                    tex->SetStatus(ImTextureStatus_OK);
+                } else if (tex->Status == ImTextureStatus_WantDestroy) {
+                    if (tex->TexID != ImTextureID_Invalid) {
+                        SDL_Texture* sdl_texture = (SDL_Texture*)(intptr_t)tex->TexID;
+                        if (sdl_texture) SDL_DestroyTexture(sdl_texture);
+                    }
+                    tex->SetTexID(ImTextureID_Invalid);
+                    tex->SetStatus(ImTextureStatus_Destroyed);
+                }
+            }
+        }
+    }
+
+    struct BackupSDLRendererState {
+        SDL_Rect Viewport;
+        bool ClipEnabled;
+        SDL_Rect ClipRect;
+    };
+    BackupSDLRendererState old = {};
+    old.ClipEnabled = SDL_RenderIsClipEnabled(renderer) == SDL_TRUE;
+    SDL_RenderGetViewport(renderer, &old.Viewport);
+    SDL_RenderGetClipRect(renderer, &old.ClipRect);
+
+    ImGui_ImplSDLRenderer2_SetupRenderState(renderer);
+
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    ImGui_ImplSDLRenderer2_RenderState render_state;
+    render_state.Renderer = renderer;
+    platform_io.Renderer_RenderState = &render_state;
+
+    ImVec2 clip_off = draw_data->DisplayPos;
+    ImVec2 clip_scale = render_scale;
+
+    for (const ImDrawList* draw_list : draw_data->CmdLists) {
+        const ImDrawVert* vtx_buffer = draw_list->VtxBuffer.Data;
+        const ImDrawIdx* idx_buffer = draw_list->IdxBuffer.Data;
+
+        for (int cmd_i = 0; cmd_i < draw_list->CmdBuffer.Size; cmd_i++) {
+            const ImDrawCmd* pcmd = &draw_list->CmdBuffer[cmd_i];
+            if (pcmd->UserCallback) {
+                if (pcmd->UserCallback == ImGui_ImplSDLRenderer2_DrawCallback_ResetRenderState)
+                    ImGui_ImplSDLRenderer2_SetupRenderState(renderer);
+                else
+                    pcmd->UserCallback(draw_list, pcmd);
+            } else {
+                ImVec2 clip_min((pcmd->ClipRect.x - clip_off.x) * clip_scale.x,
+                                (pcmd->ClipRect.y - clip_off.y) * clip_scale.y);
+                ImVec2 clip_max((pcmd->ClipRect.z - clip_off.x) * clip_scale.x,
+                                (pcmd->ClipRect.w - clip_off.y) * clip_scale.y);
+                if (clip_min.x < 0.0f) clip_min.x = 0.0f;
+                if (clip_min.y < 0.0f) clip_min.y = 0.0f;
+                if (clip_max.x > (float)fb_width) clip_max.x = (float)fb_width;
+                if (clip_max.y > (float)fb_height) clip_max.y = (float)fb_height;
+                if (clip_max.x <= clip_min.x || clip_max.y <= clip_min.y) continue;
+
+                SDL_Rect r = { (int)clip_min.x, (int)clip_min.y,
+                               (int)(clip_max.x - clip_min.x), (int)(clip_max.y - clip_min.y) };
+                SDL_RenderSetClipRect(renderer, &r);
+
+                const float* xy = (const float*)((const char*)(vtx_buffer + pcmd->VtxOffset) + offsetof(ImDrawVert, pos));
+                const float* uv = (const float*)((const char*)(vtx_buffer + pcmd->VtxOffset) + offsetof(ImDrawVert, uv));
+#if SDL_VERSION_ATLEAST(2,0,19)
+                const SDL_Color* color = (const SDL_Color*)((const char*)(vtx_buffer + pcmd->VtxOffset) + offsetof(ImDrawVert, col));
+#else
+                const int* color = (const int*)((const char*)(vtx_buffer + pcmd->VtxOffset) + offsetof(ImDrawVert, col));
+#endif
+
+                SDL_Texture* tex = (SDL_Texture*)pcmd->GetTexID();
+                SDL_RenderGeometryRaw(renderer, tex,
+                    xy, (int)sizeof(ImDrawVert),
+                    color, (int)sizeof(ImDrawVert),
+                    uv, (int)sizeof(ImDrawVert),
+                    draw_list->VtxBuffer.Size - pcmd->VtxOffset,
+                    idx_buffer + pcmd->IdxOffset, pcmd->ElemCount, sizeof(ImDrawIdx));
+            }
+        }
+    }
+    platform_io.Renderer_RenderState = nullptr;
+
+    SDL_RenderSetViewport(renderer, &old.Viewport);
+    SDL_RenderSetClipRect(renderer, old.ClipEnabled ? &old.ClipRect : nullptr);
+}
+
+void ImGui_ImplSDLRenderer2_CreateDeviceObjects() {}
+void ImGui_ImplSDLRenderer2_DestroyDeviceObjects() {
+    for (ImTextureData* tex : ImGui::GetPlatformIO().Textures)
+        if (tex->RefCount == 1) {
+            tex->SetStatus(ImTextureStatus_WantDestroy);
+        }
+}
+
+bool ImGui_ImplSDLRenderer2_Init(SDL_Renderer* renderer) {
+    ImGuiIO& io = ImGui::GetIO();
+    IMGUI_CHECKVERSION();
+    IM_ASSERT(io.BackendRendererUserData == nullptr && "Already initialized a renderer backend!");
+    IM_ASSERT(renderer != nullptr);
+
+    ImGui_ImplSDLRenderer2_Data* bd = new ImGui_ImplSDLRenderer2_Data();
+    io.BackendRendererUserData = (void*)bd;
+    io.BackendRendererName = "imgui_impl_sdlrenderer2";
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+    platform_io.DrawCallback_ResetRenderState = ImGui_ImplSDLRenderer2_DrawCallback_ResetRenderState;
+
+    bd->Renderer = renderer;
+    return true;
+}
+
+void ImGui_ImplSDLRenderer2_Shutdown() {
+    ImGui_ImplSDLRenderer2_Data* bd = ImGui_ImplSDLRenderer2_GetBackendData();
+    IM_ASSERT(bd != nullptr);
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO();
+
+    ImGui_ImplSDLRenderer2_DestroyDeviceObjects();
+
+    io.BackendRendererName = nullptr;
+    io.BackendRendererUserData = nullptr;
+    io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures);
+    platform_io.ClearRendererHandlers();
+    delete bd;
+}
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+#endif // #ifndef IMGUI_DISABLE

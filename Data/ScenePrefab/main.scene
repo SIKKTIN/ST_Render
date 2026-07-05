@@ -1,0 +1,63 @@
+{
+    "sceneName": "Untitled",
+    "objects": [
+        {
+            "name": "YellowQuad",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": false,
+            "isSprite": false
+        },
+        {
+            "name": "RedQuad",
+            "position": [300, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "shapeType": "Quad",
+            "color": [1, 0, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": false,
+            "isSprite": false
+        },
+        {
+            "name": "CinemachineTarget_2",
+            "position": [158, 48, 0],
+            "rotation": [0, 0, 0],
+            "scale": [464, 261, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 1, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": true,
+            "cinemachine": {
+                "viewportWidth": 464
+            }
+        },
+        {
+            "name": "Player_3",
+            "position": [42.7394, 101.69, 0],
+            "rotation": [0, 0, 0],
+            "scale": [1, 1, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 1, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": false,
+            "isSprite": true,
+            "textureName": "",
+            "textureIndex": -1,
+            "flipX": false,
+            "flipY": false
+        }
+    ]
+}

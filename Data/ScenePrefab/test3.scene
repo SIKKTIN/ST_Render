@@ -1,0 +1,51 @@
+{
+    "sceneName": "Untitled",
+    "objects": [
+        {
+            "name": "YellowQuad",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [200, 200, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": false,
+            "isSprite": false
+        },
+        {
+            "name": "RedQuad",
+            "position": [300, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [200, 200, 1],
+            "shapeType": "Quad",
+            "color": [1, 0, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": false,
+            "isSprite": false
+        },
+        {
+            "name": "CinemachineTarget_2",
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [640, 480, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 1, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isCinemachine": true,
+            "cinemachine": {
+                "viewportWidth": 1280,
+                "damping": 0,
+                "hasDeadZone": false,
+                "deadZone": [0, 0],
+                "hasBounds": false,
+                "bounds": [0, 0, 0, 0]
+            }
+        }
+    ]
+}

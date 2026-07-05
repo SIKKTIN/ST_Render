@@ -1,0 +1,147 @@
+# =============================================================
+# ST_Render .gitignore
+# C++ / CMake / vcpkg / IDE 通用忽略规则
+# =============================================================
+
+# ---------- 构建产物 ----------
+build/
+cmake-build-*/
+out/
+bin/
+lib/
+
+# CMake 临时文件
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Make / Ninja
+Makefile
+*.make
+*.mk
+*.cmake
+!CMakeLists.txt
+!cmake/*.cmake
+
+# ---------- vcpkg ----------
+vcpkg_installed/
+vcpkg/
+
+# ---------- 第三方依赖（若手动放置）----------
+third_party/
+_ThirdParty/
+Dependencies/
+
+# ---------- 第三方库 / DLL ----------
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.so
+*.so.*
+*.dylib
+*.a
+*.o
+*.obj
+
+# ---------- 可执行文件 ----------
+*.exe
+*.out
+*.app
+*.run
+*.bin
+
+# ---------- C++ 编译器产物 ----------
+*.pch
+*.gch
+*.dep
+
+# ---------- 调试 / 运行时生成 ----------
+*.log
+*.tmp
+*.swp
+*.swo
+*.bak
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+*.stackdump
+core
+core.*
+*.core
+*.dmp
+*.ipdb
+
+# ---------- 资源缓存 / 运行时输出 ----------
+*.png.output
+output.png
+output.bmp
+output.ppm
+*.tmp.png
+
+# ---------- IDE ----------
+# Visual Studio
+.vs/
+.vscode/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.suo.*
+*.userprefs
+*.aps
+*.pch
+*.vspscc
+*.vssscc
+*.tlog
+*.unsuccessful
+*.VC.db
+*.VC.opendb
+ipch/
+[Dd]ebug/
+[Dd]ebug-*/
+[Rr]elease/
+[Rr]el[Rr]elease/
+x64/
+x86/
+Win32/
+ARM/
+ARM64/
+[Ii]pch/
+[Bb]uild[Ll]og.*
+*.[Pp]ublish.xml
+
+# Visual Studio Code
+.vscode/
+.history/
+
+# JetBrains / CLion
+.idea/
+*.iml
+cmake-build-*/
+
+# Cursor / VSCode衍生
+.cursor/
+
+# XMake / Meson
+.xmake/
+buildir/
+
+# ---------- imgui.ini（编辑器窗口布局） ----------
+# 这个保留也行，如要忽略请取消下一行注释
+imgui.ini
+
+# ---------- 系统垃圾 ----------
+~$*
+~*
+*.tmp

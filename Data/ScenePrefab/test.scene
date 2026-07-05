@@ -1,0 +1,29 @@
+{
+    "sceneName": "Untitled",
+    "objects": [
+        {
+            "name": "YellowQuad",
+            "position": [-166, -180, 0],
+            "rotation": [0, 0, 0],
+            "scale": [200, 200, 1],
+            "shapeType": "Quad",
+            "color": [1, 1, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isSprite": false
+        },
+        {
+            "name": "RedQuad",
+            "position": [300, 0, 0],
+            "rotation": [0, 0, 0],
+            "scale": [200, 200, 1],
+            "shapeType": "Quad",
+            "color": [1, 0, 0, 1],
+            "tint": [1, 1, 1, 1],
+            "sortingOrder": 0,
+            "showAABB": false,
+            "isSprite": false
+        }
+    ]
+}
