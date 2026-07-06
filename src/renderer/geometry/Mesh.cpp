@@ -25,22 +25,36 @@ namespace ST {
         Mesh mesh;
         float h = size / 2.0f;
 
-        mesh.addVertex(Vertex(Vector3(-h, -h, -h)));
-        mesh.addVertex(Vertex(Vector3( h, -h, -h)));
-        mesh.addVertex(Vertex(Vector3( h,  h, -h)));
-        mesh.addVertex(Vertex(Vector3(-h,  h, -h)));
-        mesh.addVertex(Vertex(Vector3(-h, -h,  h)));
-        mesh.addVertex(Vertex(Vector3( h, -h,  h)));
-        mesh.addVertex(Vertex(Vector3( h,  h,  h)));
-        mesh.addVertex(Vertex(Vector3(-h,  h,  h)));
+        // Box vertices ordered so each face's winding is CCW when viewed
+        // from outside the box (i.e. the cross of (v1-v0) x (v2-v0) points
+        // away from the box's centre). See docs/rendering/3d-culling-bugs.md
+        // for the historical note: the previous winding produced
+        // inward-facing face normals, which silently cancelled out the
+        // back-face culling sign at the default camera angle but broke at
+        // every other yaw / pitch.
+        mesh.addVertex(Vertex(Vector3(-h, -h, -h))); // v0
+        mesh.addVertex(Vertex(Vector3( h, -h, -h))); // v1
+        mesh.addVertex(Vertex(Vector3( h,  h, -h))); // v2
+        mesh.addVertex(Vertex(Vector3(-h,  h, -h))); // v3
+        mesh.addVertex(Vertex(Vector3(-h, -h,  h))); // v4
+        mesh.addVertex(Vertex(Vector3( h, -h,  h))); // v5
+        mesh.addVertex(Vertex(Vector3( h,  h,  h))); // v6
+        mesh.addVertex(Vertex(Vector3(-h,  h,  h))); // v7
 
+        // CCW from outside (right-hand: normal points outward):
+        //   -Z face (z = -h) -- vertices v0 v3 v2 v1
+        //   +Z face (z = +h) -- vertices v4 v5 v6 v7
+        //   -X face (x = -h) -- vertices v0 v4 v7 v3
+        //   +X face (x = +h) -- vertices v1 v2 v6 v5
+        //   -Y face (y = -h) -- vertices v0 v1 v5 v4
+        //   +Y face (y = +h) -- vertices v3 v7 v6 v2
         int faces[12][3] = {
-            {0, 1, 2}, {0, 2, 3},
-            {5, 4, 7}, {5, 7, 6},
-            {4, 0, 3}, {4, 3, 7},
-            {1, 5, 6}, {1, 6, 2},
-            {3, 2, 6}, {3, 6, 7},
-            {4, 5, 1}, {4, 1, 0}
+            {0, 3, 2}, {0, 2, 1},   // -Z
+            {4, 5, 6}, {4, 6, 7},   // +Z
+            {0, 4, 7}, {0, 7, 3},   // -X
+            {1, 2, 6}, {1, 6, 5},   // +X
+            {0, 1, 5}, {0, 5, 4},   // -Y
+            {3, 7, 6}, {3, 6, 2}    // +Y
         };
 
         for (int i = 0; i < 12; ++i) {

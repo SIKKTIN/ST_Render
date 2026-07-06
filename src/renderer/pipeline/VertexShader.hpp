@@ -78,4 +78,82 @@ namespace ST {
 				);
 		}
 	};
+
+	// Linear interpolation of all per-vertex attributes (position in clip
+	// space, world position, normal, texcoord, color). Used by the
+	// near-plane clipper to construct new vertices on a clipped edge.
+	inline VertexOut lerpVertexOut(const VertexOut& a, const VertexOut& b, float t) {
+		VertexOut r;
+		r.position       = a.position       + (b.position       - a.position)       * t;
+		r.worldPosition  = a.worldPosition  + (b.worldPosition  - a.worldPosition)  * t;
+		r.normal         = a.normal         + (b.normal         - a.normal)         * t;
+		r.texCoord       = a.texCoord       + (b.texCoord       - a.texCoord)       * t;
+		r.color.r        = a.color.r        + (b.color.r        - a.color.r)        * t;
+		r.color.g        = a.color.g        + (b.color.g        - a.color.g)        * t;
+		r.color.b        = a.color.b        + (b.color.b        - a.color.b)        * t;
+		r.color.a        = a.color.a        + (b.color.a        - a.color.a)        * t;
+		return r;
+	}
+
+	// Sutherland-Hodgman clip against the near plane. The renderer uses
+	// the GL convention w_clip = -z_view, so the near plane in clip space
+	// is the line w = 0. A vertex with w > 0 is on the inside (visible)
+	// side of the near plane; one with w <= 0 is behind the eye.
+	//
+	// Returns 0 (fully outside, dropped), 1 (fully inside, unchanged), 2
+	// (straddling -- emitted as 1 or 2 sub-triangles). The output array
+	// `emitVertices` holds the emitted vertices in order; `emitCount` (an
+	// out parameter) reports how many of them are valid (3 or 4). Caller
+	// tessellates a fan over the emitted vertices: 3 -> one triangle,
+	// 4 -> two triangles (0-1-2 and 0-2-3).
+	inline void clipTriangleAgainstNearPlane(const VertexOut& v0,
+	                                         const VertexOut& v1,
+	                                         const VertexOut& v2,
+	                                         VertexOut emitVertices[4],
+	                                         int& emitCount) {
+		const VertexOut* inV[3] = { &v0, &v1, &v2 };
+		bool inside[3] = {
+			inV[0]->position.w > 0.0f,
+			inV[1]->position.w > 0.0f,
+			inV[2]->position.w > 0.0f
+		};
+		int insideCount = (int)inside[0] + (int)inside[1] + (int)inside[2];
+		emitCount = 0;
+
+		if (insideCount == 0) {
+			return;
+		}
+		if (insideCount == 3) {
+			emitVertices[0] = v0;
+			emitVertices[1] = v1;
+			emitVertices[2] = v2;
+			emitCount = 3;
+			return;
+		}
+
+		// Walk the three edges (inV[i], inV[i+1]) in order, emitting the
+		// clipped points as Sutherland-Hodgman prescribes.
+		auto step = [&](const VertexOut& a, const VertexOut& b,
+		                bool aInside, bool bInside) {
+			if (aInside && bInside) {
+				emitVertices[emitCount++] = b;
+			} else if (aInside && !bInside) {
+				// a inside, b outside: emit intersection only.
+				float t = a.position.w / (a.position.w - b.position.w);
+				emitVertices[emitCount++] = lerpVertexOut(a, b, t);
+			} else if (!aInside && bInside) {
+				// a outside, b inside: emit intersection then b.
+				float t = a.position.w / (a.position.w - b.position.w);
+				emitVertices[emitCount++] = lerpVertexOut(a, b, t);
+				emitVertices[emitCount++] = b;
+			}
+			// else both outside: emit nothing.
+		};
+
+		step(*inV[0], *inV[1], inside[0], inside[1]);
+		step(*inV[1], *inV[2], inside[1], inside[2]);
+		step(*inV[2], *inV[0], inside[2], inside[0]);
+
+		// emitCount is 3 (2in+1out -> triangle) or 4 (1in+2out -> quad).
+	}
 }

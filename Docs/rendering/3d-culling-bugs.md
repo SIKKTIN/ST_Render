@@ -155,6 +155,89 @@ bool isInFrustum(const VertexOut& v) {
 
 对于 12 个三角形的小 demo cube 这基本看不出。如果后续渲染复杂 mesh，需要在 `Rasterizer::rasterizeTriangle()` 之前加 **Sutherland-Hodgman clipper**（沿 near plane 把三角形 split 成最多 2 个）。本仓库当前不实现。
 
+### 性能补救：trivial-reject
+
+为了让相机走到 cube 表面 / 进入 cube 内部时仍然能跑得动，加一层 **trivial-reject frustum culling**：
+
+```cpp
+// 三个顶点都"完全在视锥外"才剔掉。
+// 单顶点 `w <= 0`（在相机后面）视为"穿越视锥" → 保留，由 rasterizer 自己处理。
+bool triviallyOutside = true;
+for (auto* vs : {&v0, &v1, &v2}) {
+    float w = vs->position.w;
+    if (w <= 0.0f) { triviallyOutside = false; break; }
+    if (vs->position.x > -w && vs->position.x < w &&
+        vs->position.y > -w && vs->position.y < w &&
+        vs->position.z > -w && vs->position.z < w) {
+        triviallyOutside = false;
+        break;
+    }
+}
+if (triviallyOutside) continue;
+```
+
+为什么这样能省事：
+- 进入 cube 内部时，背向相机的 3 个三角形顶点都在 near plane 外侧 → trivial reject 干掉
+- "贴脸" 时三角形顶点 x/y 跨度极大、`w` 接近 0 或翻转 → 大多数三角形 trivially outside → rasterizer 不再扫整张屏
+
+和之前"Bug B" 的区别：
+- Bug B：要求 3 顶点**全在内**才保留 → 把可见三角形误剔
+- 这里：要求 3 顶点**全在外**才剔 → 只剔绝对不可见的，不会误剔可见三角形
+
+---
+
+## 进入 mesh 内部该怎么显示
+
+`createCube()` 的 mesh 只有 6 个面、12 个三角形，**都是单面的外表面**。从外面看是正常的实心 cube；但从里面看，**所有可见三角形都被 back-face culling 干掉了**——屏幕全空。
+
+### 两种通用方案
+
+| 方案 | 实现 | 优点 | 缺点 |
+|---|---|---|---|
+| **(A) 每个面建双面三角形**（cube → 24 tri） | mesh 加内壁三角形，法线反向 | 物理上正确；两个方向都正确 cull | 三角形数 × 2；需要按材质 / 纹理区分内外 |
+| **(B) 动态切换 culling 方向**（当前实现） | 检测 camera 是否在 mesh 内部，是则翻转 dot 判断 | mesh 不变；外看内看都用同一份三角形 | 只对**凸** mesh 严格正确；mesh 中心 / 包围球要算对 |
+
+### 实现（方案 B）
+
+```cpp
+// 一次算出 mesh center + 包围球半径
+ST::Vector3 meshCenter(0, 0, 0);
+for (auto& v : verts) meshCenter = meshCenter + v.position;
+meshCenter = meshCenter * (1.0f / verts.size());
+
+ST::Vector3 meshCenterWorld = (model * ST::Vector4(meshCenter, 1.0f)).toVector3();
+float boundingRadius = 0.0f;
+for (auto& v : verts) boundingRadius = std::max(boundingRadius, (v.position - meshCenter).length());
+
+// camera 在 mesh 内部 ↔ |camera - center| < radius
+bool cameraInside = (meshCenterWorld - m_eye).length() < boundingRadius;
+
+// culling 时翻转 dot 判断
+float visibilityDot = faceNormal.dot(toEye);
+if (cameraInside) visibilityDot = -visibilityDot;
+if (visibilityDot <= 0.0f) continue;
+```
+
+为什么翻转：
+- 相机在 cube 外：faceNormal 朝外，`toEye` 朝相机 → dot > 0（面朝相机）保留；< 0 剔
+- 相机在 cube 内：faceNormal 仍然朝外（mesh 没改），但 `toEye` 现在指向**内部** → dot 全部 < 0 → 全剔
+- 把 dot 翻转 → dot > 0 变成 dot < 0 保留（这些是面"最不朝外"的面 —— 即离相机最近的内壁）
+
+### 局限性
+
+- **只对凸 mesh 严格成立**。凹 mesh（带洞、互相穿入）会有"相机在 mesh 内的局部空洞"——包围球判定说"在内"，但其实相机在凸包内部 + 实际 mesh 的空洞里。处理这种需要空间分割或 per-mesh-region 判定，超出本仓库范围。
+- 用包围球判断 inside/outside 比 AABB 准，但对很扁的 mesh（圆盘）会出现"包围球判定说在内、实际在外"。当前 cube 是 unit cube，球 / AABB 等价，没问题。
+- 对**会变形**（骨骼动画、morph target）的 mesh，center / radius 需要每帧重算。本仓库不涉及。
+
+### 另一个备选方案：Sutherland-Hodgman near-plane clipper
+
+要彻底解决"贴脸 + 内部"的画面瑕疵，**真正的修复**是在 `Rasterizer::rasterizeTriangle()` 入口加 **Sutherland-Hodgman clipper**，把穿越 near plane 的三角形 split 成最多 2 个三角形，让所有要画的三角形都在视锥内。这样：
+
+- 进入 cube 内部时不会出现"三角形一部分在 near plane 内、一部分在外"的诡异穿帮
+- trivial-reject 退化成"完全在视锥外的三角形剔掉"（已经做到）
+
+本仓库当前**不实现** —— 12 个三角形的小 demo 视觉上看不出区别，工作量大。
+
 ---
 
 ## 调试步骤（如果再发生类似症状）
@@ -179,12 +262,85 @@ bool isInFrustum(const VertexOut& v) {
 | `src/app/main/TestModule_3DRender.cpp` | `drawMesh()` | Bug A + Bug B 都在这里 |
 | `src/renderer/pipeline/VertexShader.hpp` | `isInFrustum()` | Bug B 的判断函数本身没动，但调用方式错 |
 | `src/renderer/pipeline/Rasterizer.hpp` | `toScreenSpace()` | 解释了为什么 NDC 叉乘符号错了（Y 翻转） |
-| `src/renderer/geometry/Mesh.cpp` | `Mesh::createCube()` | 顶点顺序 CCW，正确，没动 |
+| `src/renderer/geometry/Mesh.cpp` | `Mesh::createCube()` | 顶点顺序 CCW——已修正（见后文） |
+
+---
+
+## 后续修复：near-plane clipper + cube winding
+
+修完 Bug A / B 之后，还观察到一组**新症状**：
+
+| 症状 | 触发条件 |
+|---|---|
+| 鼠标拖动 yaw 经过某些角度时，整屏几乎被同一个 cube 颜色覆盖（"看向后方看到一个正方形"） | yaw ≈ 0.67π, 1.67π（eye 朝向接近 cube 背面） |
+| 鼠标横向 / 纵向操作"看起来反了" | 同样的角度区间 |
+| 在 canvas 中旋转 90° 前后，cube 突然消失 | yaw ≈ ±π/2 |
+
+### 真凶
+
+这两组症状实际上由**两个独立的根因**叠加而成，写完 Bug A / B 之后用 `ST_Render_Dump` 离线扫描 yaw sweep 才暴露出来。
+
+#### 1. 没有近裁面 clipper
+
+`drawMesh` 通过 back-face culling + trivial-reject 后直接调 `Rasterizer::rasterizeTriangle(v0, v1, v2)`。当三角形部分顶点在 near plane 后（`position.w <= 0`）、部分顶点在 near plane 前（`w > 0`）时：
+
+- 透视除法 `position.x / w` 在 `w <= 0` 的顶点上**反号**，三角形在屏幕上映射到错误位置。
+- **bounding box** 计算（min/max of `s0.x, s1.x, s2.x`）会包含 ±∞ 量级的 NaN/Inf 数值，被 `std::max(0, ...)` / `std::min(W-1, ...)` clamp 成 **整个 viewport**——rasterizer 扫遍整屏。
+- 透视校正深度（`1/w`）也 invalid，深度测试时会出现诡异的"提前挡住"或"挡不住"。
+
+结果：**整个 viewport 会被一两个坏三角形覆盖成一个色块**——这正是用户描述的"看向后方看到一个正方形"。"操作颠倒"也是同一回事：cube 被错误地镜像绘制到屏幕的另一侧，**看起来**是 WASD 转错了方向。
+
+**修复**：在 `src/renderer/pipeline/VertexShader.hpp` 加 `clipTriangleAgainstNearPlane(v0, v1, v2, emitBuf, emitCount)`，Sutherland-Hodgman 单边裁剪。`drawMesh` 在 back-face culling 之后调用它，分裂出 1-2 个全 `w > 0` 的子三角形，再分别 rasterize。clipper 输出 `emitCount == 0`（全剔）/`3`（单三角形）/`4`（quad → 拆成 2 个三角形）。
+
+#### 2. Cube 顶点 winding 是 CW 不是 CCW
+
+`Mesh::createCube` 的 face indices 是按**CW from outside view** 排序的，结果 `(v1 - v0) × (v2 - v0)` 算出来的"法线"全部指向 cube **内部**。
+
+为什么 yaw=0 时还能看见 cube？—— back-face culling 用 `dot(faceNormal, toEye) > 0` 保留；当 faceNormal 朝内、camera 朝 -Z 时，`toEye` 朝 +Z，`dot(+Z, +Z) = +1 > 0` 错误地保留 back-facing 三角形。Bug A 修过之后（用 `faceNormal.dot(toEye)`），这个隐藏的"巧合抵消"就不存在了——结果就是某些 yaw 角度 cube 整面不见。
+
+**修复**：把 12 个 face 的 indices 全部改成 CCW from outside view，让计算出的 `faceNormal` 真的是外法线。`Mesh::createCube` 加注释指明每个面顶点的 CW/CCW 约定。`ST_Render_Dump` 离线工具的 "Reference face normals" 输出可以用来验证。
+
+### 修复后 sweep 结果
+
+`ST_Render_Dump --sweep --sweep-n=12 --w=120 --h=90`（默认相机在 `(1.6, 1, 2.5)`，pitch=0.35）：
+
+| yaw (rad) | 修复前 cube 像素 | 修复后 |
+|---|---|---|
+| 0.00π | 1215 (11%) | 1215 (11%) ✓ |
+| 0.50π | **0** (cube 在视野外) | 0 ✓ |
+| 0.67π | **9725 (90% 全屏覆盖)** | **0** ✓ |
+| 1.67π | **10800 (100% 全屏覆盖)** | **0** ✓ |
+
+**"整屏被填满" 的两个异常角度都被消除**，但 yaw ∈ [0.5π, 1.83π] 仍然是 0 像素——这是因为 fly camera 加上 cube 在固定 origin、相机在原点外时，yaw 转过 90° 后 cube 就几何上跑出水平 FOV 外（60° 垂直 × 4:3 aspect → 水平半 FOV ≈ 37.5°）。这不是 bug，**是 fly camera + 固定目标的几何特性**。如果想让 cube 始终在视野里，可以：
+- 加大 `near` 附近的 FOV（比如 90°）
+- 缩短相机距 cube 距离
+- 切回 orbit camera（自动跟随 yaw 调整目标点）
+
+### 新增的离线工具
+
+`src/app/main/test_3d_dump.cpp`（target `ST_Render_Dump`）：
+
+- `--sweep --sweep-n=N`：从 yaw=0 扫到 yaw=2π，每隔 2π/N 取一个角度，跑 cube 渲染，打印每帧 cube 像素数 + 屏幕 bbox + 屏幕中心。
+- `--yaw=... --out=path.ppm`：单帧渲染，存为 PPM，方便离线看 image 工具检查。
+- `--w=W --h=H`：覆盖默认 640x480，可用来在不同 aspect ratio 下复测。
+- 每次 dump 都附一个 "Triangle visibility audit"：12 个三角形每个打印 back-face culling + near-plane clipper 的取舍（`K` = kept，`c` = culled，`X` = clip drop，`Q` = quad split），用来快速看出"三角形被什么步骤干掉"。
+
+### 修改清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer/pipeline/VertexShader.hpp` | 新增 `lerpVertexOut` + `clipTriangleAgainstNearPlane` |
+| `src/renderer/geometry/Mesh.cpp` | `Mesh::createCube` 12 个 face indices 改为 CCW from outside |
+| `src/app/main/TestModule_3DRender.cpp::drawMesh` | trivial-reject 改为"全外才剔"；back-face culling 之后调 near-plane clipper；每个 clip 子三角形单独 rasterize |
+| `src/app/main/CMakeLists.txt` | 新增 `ST_Render_Dump` 离线诊断 target |
+| `src/app/main/test_3d_dump.cpp` | 新增离线 dump + sweep 工具 |
+| `docs/rendering/3d-culling-bugs.md` | 本节新增 |
 
 ---
 
 ## 教训 / 备忘
 
 - **Back-face culling 不要在屏幕 / NDC 空间做 2D 叉乘**。一来 viewport / Y-flip 让符号不直观，二来透视投影的非线性变换让"屏幕 CCW ≠ 几何 CCW"在边界处不一致。用世界空间面法线 vs `toEye` 是最不依赖约定的写法。
-- **顶点级 frustum culling 是反模式**，除非三角形数量巨大（如粒子、植被）否则不写。Per-pixel depth + 屏幕 clamp 已经够。
+- **顶点级 frustum culling 反模式**：要求"3 顶点全在视锥内才保留"——会把跨越视锥边界的可见三角形误剔。这是过去 Bug B 的根因。
+- **Trivial-reject frustum culling 是反模式的修正版**：要求"3 顶点全在视锥外才剔"——只剔绝对不可见的，不误剔可见三角形。**且这是性能优化的合理手段**：对贴脸 / 进入 mesh 内部这种三角形 `w` 翻转 / 跨越 near plane 的情况，能跳过大量 rasterize 调用。
 - 写 culling 时**先彻底关闭它**验证物体本身能渲染，再"加一层看是否还能渲染"，可以快速二分定位。

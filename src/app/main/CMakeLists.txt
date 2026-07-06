@@ -36,6 +36,21 @@ target_link_libraries(ST_Render_Manager PRIVATE
 
 target_link_options(ST_Render_Manager PRIVATE /OPT:NOREF /WHOLEARCHIVE:$<TARGET_FILE:Editor> /WHOLEARCHIVE:$<TARGET_FILE:DataBase> /WHOLEARCHIVE:$<TARGET_FILE:Music>)
 
+#if(WIN32)
+# Offline diagnostic for TestModule_3DRender. Renders the cube off-screen at
+# a sweep of yaw values and prints per-frame pixel-count / screen-bbox stats,
+# so we can investigate "camera looks the other way and still sees a square"
+# without needing an actual SDL display. Mirrors the same Renderer/Pipeline
+# targets as ST_Render_Manager minus ImGui / SDL2main.
+add_executable(ST_Render_Dump
+    test_3d_dump.cpp
+)
+target_link_libraries(ST_Render_Dump PRIVATE
+    Math Buffer Geometry Transform Camera Pipeline Renderer
+)
+target_include_directories(ST_Render_Dump PRIVATE src)
+#endif()
+
 if(WIN32)
     add_custom_command(TARGET ST_Render_Manager POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
