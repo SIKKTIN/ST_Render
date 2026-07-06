@@ -1,4 +1,4 @@
-﻿# 3D 剔除（Culling）两个连环 Bug
+# 3D 剔除（Culling）两个连环 Bug
 
 记录 `TestModule_3DRender` 中两个相互独立的剔除错误，它们叠加产生了"移动相机后整个方块消失"和"近看时整面丢失"两种症状。
 

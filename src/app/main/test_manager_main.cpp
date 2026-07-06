@@ -165,6 +165,24 @@ int main(int argc, char* argv[]) {
             }
 
             bool canvasHandled = false;
+            // First, decide whether the mouse is over the canvas this frame.
+            // We use the on-screen Image rect (recorded during the last ImGui
+            // render) so we know whether a mouse event landed inside the
+            // canvas or inside one of the editor panels (Tests / Controls /
+            // Create Object / Menu / Console).  Outside-canvas events should
+            // never reach the module's camera / scene handlers -- the panels
+            // themselves handle their own clicks via ImGui.
+            bool inCanvas = false;
+            if (canvasMinX != canvasMaxX) {
+                if (event.type == SDL_MOUSEMOTION) {
+                    inCanvas = (event.motion.x >= canvasMinX && event.motion.x < canvasMaxX &&
+                                event.motion.y >= canvasMinY && event.motion.y < canvasMaxY);
+                } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
+                    inCanvas = (event.button.x >= canvasMinX && event.button.x < canvasMaxX &&
+                                event.button.y >= canvasMinY && event.button.y < canvasMaxY);
+                }
+            }
+
             // Route canvas-space events to the selected module (generic).
             //
             // Modules that override onCanvasMouseDown/Up/Move get render-target
@@ -172,60 +190,58 @@ int main(int argc, char* argv[]) {
             // picking / picking helpers like TestModule_2D_Scene::pickObject3D
             // and onWheel expect. Modules that don't override fall through to
             // onMouse* below and receive raw screen coordinates instead.
-            if (canvasMinX != canvasMaxX) {
+            if (inCanvas) {
                 int cx = 0, cy = 0;
-                bool inCanvas = false;
                 if (event.type == SDL_MOUSEMOTION) {
                     cx = event.motion.x - canvasMinX;
                     cy = event.motion.y - canvasMinY;
-                    inCanvas = (event.motion.x >= canvasMinX && event.motion.x < canvasMaxX &&
-                                event.motion.y >= canvasMinY && event.motion.y < canvasMaxY);
                 } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
                     cx = event.button.x - canvasMinX;
                     cy = event.button.y - canvasMinY;
-                    inCanvas = (event.button.x >= canvasMinX && event.button.x < canvasMaxX &&
-                                event.button.y >= canvasMinY && event.button.y < canvasMaxY);
                 }
-                if (inCanvas) {
-                    // Normalize screen-Image coords to render-target coords.
+                if (event.type == SDL_MOUSEMOTION) {
+                    mouseX = event.motion.x;
+                    mouseY = event.motion.y;
+                } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
+                    mouseX = event.button.x;
+                    mouseY = event.button.y;
+                }
+                auto* mod = modules[selectedModule];
+                if (event.type == SDL_MOUSEMOTION) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
                         cx = cx * Layout::CANVAS_W / screenW;
                         cy = cy * Layout::CANVAS_H / screenH;
                     }
-                    if (event.type == SDL_MOUSEMOTION) {
-                        mouseX = event.motion.x;
-                        mouseY = event.motion.y;
-                    } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
-                        mouseX = event.button.x;
-                        mouseY = event.button.y;
+                    mod->onCanvasMouseMove(cx, cy);
+                    canvasHandled = true;
+                } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                    int screenW = canvasMaxX - canvasMinX;
+                    int screenH = canvasMaxY - canvasMinY;
+                    if (screenW > 0 && screenH > 0) {
+                        cx = cx * Layout::CANVAS_W / screenW;
+                        cy = cy * Layout::CANVAS_H / screenH;
                     }
-                    auto* mod = modules[selectedModule];
-                    if (event.type == SDL_MOUSEMOTION) {
-                        mod->onCanvasMouseMove(cx, cy);
-                        canvasHandled = true;
-                    } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                        mod->onCanvasMouseDown(event.button.button, cx, cy);
-                        canvasHandled = true;
-                    } else if (event.type == SDL_MOUSEBUTTONUP) {
-                        mod->onCanvasMouseUp(event.button.button, cx, cy);
-                        canvasHandled = true;
+                    mod->onCanvasMouseDown(event.button.button, cx, cy);
+                    canvasHandled = true;
+                } else if (event.type == SDL_MOUSEBUTTONUP) {
+                    int screenW = canvasMaxX - canvasMinX;
+                    int screenH = canvasMaxY - canvasMinY;
+                    if (screenW > 0 && screenH > 0) {
+                        cx = cx * Layout::CANVAS_W / screenW;
+                        cy = cy * Layout::CANVAS_H / screenH;
                     }
+                    mod->onCanvasMouseUp(event.button.button, cx, cy);
+                    canvasHandled = true;
                 }
             }
 
-            if (!canvasHandled) {
-                if (event.type == SDL_MOUSEMOTION) {
-                    mouseX = event.motion.x;
-                    mouseY = event.motion.y;
-                    modules[selectedModule]->onMouseMove(mouseX, mouseY);
-                } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                    modules[selectedModule]->onMouseDown(event.button.button, event.button.x, event.button.y);
-                } else if (event.type == SDL_MOUSEBUTTONUP) {
-                    modules[selectedModule]->onMouseUp(event.button.button);
-                }
-            }
+            // Outside-canvas events are NOT forwarded to module handlers.
+            // Editor panels (Tests / Controls / Create Object) and the menu
+            // bar own those clicks via ImGui, and forwarding them to modules
+            // causes phantom camera rotations and other interactions that
+            // should only happen over the canvas itself.
 
             if (event.type == SDL_MOUSEWHEEL) {
                 int wx = event.wheel.mouseX;
@@ -233,14 +249,14 @@ int main(int argc, char* argv[]) {
                 mouseX = wx;
                 mouseY = wy;
 
-                // In-canvas test uses the actual on-screen Image rect (recorded during
-                // last ImGui render), NOT Layout::CANVAS_H -- the latter would have
-                // (incorrectly) included the console area as part of the canvas.
-                bool inCanvas = (canvasMaxX > canvasMinX && canvasMaxY > canvasMinY &&
-                                 wx >= canvasMinX && wx < canvasMaxX &&
-                                 wy >= canvasMinY && wy < canvasMaxY);
+                // Only forward wheel events to the module when the cursor is
+                // over the canvas.  Wheels over panels belong to ImGui
+                // (scrollbars, sliders, etc.) and must NOT reach the module.
+                bool wheelInCanvas = (canvasMaxX > canvasMinX && canvasMaxY > canvasMinY &&
+                                      wx >= canvasMinX && wx < canvasMaxX &&
+                                      wy >= canvasMinY && wy < canvasMaxY);
 
-                if (inCanvas && selectedModule >= 0 && selectedModule < (int)modules.size()) {
+                if (wheelInCanvas && selectedModule >= 0 && selectedModule < (int)modules.size()) {
                     // Modules expect render-target coordinates (Layout::CANVAS_W × CANVAS_H).
                     // The on-screen Image rect may differ from the render-target size
                     // (Y differs whenever consoleHeight != 0; X coincides by current
@@ -252,11 +268,6 @@ int main(int argc, char* argv[]) {
                     modules[selectedModule]->onWheel(
                         (float)event.wheel.x, (float)event.wheel.y,
                         cx, cy, Layout::CANVAS_W, Layout::CANVAS_H
-                    );
-                } else {
-                    modules[selectedModule]->onWheel(
-                        (float)event.wheel.x, (float)event.wheel.y,
-                        mouseX, mouseY, Layout::CANVAS_W, Layout::CANVAS_H
                     );
                 }
             }
