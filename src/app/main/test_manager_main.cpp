@@ -165,7 +165,13 @@ int main(int argc, char* argv[]) {
             }
 
             bool canvasHandled = false;
-            // Route canvas-space events to UI system
+            // Route canvas-space events to the selected module (generic).
+            //
+            // Modules that override onCanvasMouseDown/Up/Move get render-target
+            // coordinates (Layout::CANVAS_W x CANVAS_H) -- this is what scene
+            // picking / picking helpers like TestModule_2D_Scene::pickObject3D
+            // and onWheel expect. Modules that don't override fall through to
+            // onMouse* below and receive raw screen coordinates instead.
             if (canvasMinX != canvasMaxX) {
                 int cx = 0, cy = 0;
                 bool inCanvas = false;
@@ -182,8 +188,6 @@ int main(int argc, char* argv[]) {
                 }
                 if (inCanvas) {
                     // Normalize screen-Image coords to render-target coords.
-                    // Modules (e.g. TestModule_2D_Scene::pickObject3D, onWheel)
-                    // expect render-target space (Layout::CANVAS_W × CANVAS_H).
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
@@ -197,17 +201,16 @@ int main(int argc, char* argv[]) {
                         mouseX = event.button.x;
                         mouseY = event.button.y;
                     }
-                    if (auto* s2d = dynamic_cast<TestModule_2D_Scene*>(modules[selectedModule])) {
-                        if (event.type == SDL_MOUSEMOTION) {
-                            s2d->onCanvasMouseMove(cx, cy);
-                            canvasHandled = true;
-                        } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                            s2d->onCanvasMouseDown(event.button.button, cx, cy);
-                            canvasHandled = true;
-                        } else if (event.type == SDL_MOUSEBUTTONUP) {
-                            s2d->onCanvasMouseUp(event.button.button, cx, cy);
-                            canvasHandled = true;
-                        }
+                    auto* mod = modules[selectedModule];
+                    if (event.type == SDL_MOUSEMOTION) {
+                        mod->onCanvasMouseMove(cx, cy);
+                        canvasHandled = true;
+                    } else if (event.type == SDL_MOUSEBUTTONDOWN) {
+                        mod->onCanvasMouseDown(event.button.button, cx, cy);
+                        canvasHandled = true;
+                    } else if (event.type == SDL_MOUSEBUTTONUP) {
+                        mod->onCanvasMouseUp(event.button.button, cx, cy);
+                        canvasHandled = true;
                     }
                 }
             }

@@ -27,6 +27,9 @@ public:
     void render(void* canvasTexture, int canvasW, int canvasH) override;
     bool renderControls() override;
 
+    void onMouseDown(int button, int x, int y) override;
+    void onMouseUp(int button) override;
+    void onMouseMove(int x, int y) override;
     void onCanvasMouseDown(int button, int canvasX, int canvasY) override;
     void onCanvasMouseUp(int button, int canvasX, int canvasY) override;
     void onCanvasMouseMove(int canvasX, int canvasY) override;
@@ -46,10 +49,19 @@ private:
 
     ST::Mesh m_cube;
 
-    // Orbit camera state (right-mouse drag rotates around origin)
-    float m_orbitYaw;       // radians, around world Y
-    float m_orbitPitch;     // radians, around camera-right axis
-    float m_orbitDistance;  // distance from origin
+    // Fly camera state (UE-style):
+    //   - LMB drag: rotate view (yaw/pitch)
+    //   - RMB drag also rotates (so you can fly + look simultaneously)
+    //   - RMB hold + WASD/QE: move in the camera's local frame
+    //   - Wheel: adjust movement speed
+    //   - Shift: hold to sprint
+    ST::Vector3 m_eye;
+    float m_yaw;          // around world Y (radians)
+    float m_pitch;        // around camera-right axis (radians)
+    float m_moveSpeed;    // WASD units/sec
+    float m_moveSpeedMin;
+    float m_moveSpeedMax;
+    bool  m_lmbDown;
     bool  m_rmbDown;
     int   m_lastCanvasX;
     int   m_lastCanvasY;
