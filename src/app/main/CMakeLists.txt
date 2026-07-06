@@ -2,27 +2,16 @@
 # 主程序和测试管理器（ImGui）
 
 # ST_Render_Manager (Dear ImGui)
-# 主入口：test_manager_main.cpp 负责启动 TestManager + ImGui 框架
+# 主入口：test_manager_main.cpp 负责启动 ImGui 框架
 add_executable(ST_Render_Manager
-    TestManager.cpp
     test_manager_main.cpp
+    HierarchyPanel.cpp
     TestModule_FrameBuffer.cpp
     TestModule_Rasterizer.cpp
-    TestModule_VertexShader.cpp
-    TestModule_2D_Scene.cpp
     TestModule_3DRender.cpp
-    TestModule_Sprite2D.cpp
     TestModule_Texture.cpp
     TestModule_Music.cpp
     TestModule_NetworkTest.cpp
-    test_math.cpp
-    test_buffer.cpp
-    test_geometry.cpp
-    test_transform.cpp
-    test_camera.cpp
-    test_pipeline.cpp
-    test_renderer.cpp
-    test_sdl_window.cpp
     imgui_impl_sdl2.cpp
     imgui_impl_sdlrenderer2.cpp
 )

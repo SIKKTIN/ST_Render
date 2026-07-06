@@ -1,4 +1,4 @@
-﻿#include <imgui.h>
+#include <imgui.h>
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <vector>
@@ -10,13 +10,10 @@
 #include "TestModule_Rectangle.hpp"
 #include "TestModule_FrameBuffer.hpp"
 #include "TestModule_Rasterizer.hpp"
-#include "TestModule_VertexShader.hpp"
-#include "TestModule_2D_Scene.hpp"
 #include "TestModule_3DRender.hpp"
 #include "TestModule_Texture.hpp"
 #include "TestModule_Music.hpp"
 #include "TestModule_DragWindow.hpp"
-#include "TestModule_Sprite2D.hpp"
 #include "TestModule_NetworkTest.hpp"
 #include "engine/editor/TextureManager.hpp"
 #include "engine/editor/AudioManager.hpp"
@@ -78,10 +75,7 @@ int main(int argc, char* argv[]) {
     std::vector<IModule*> modules;
     modules.push_back(new TestModule_FrameBuffer());
     modules.push_back(new TestModule_Rasterizer());
-    modules.push_back(new TestModule_VertexShader());
-    modules.push_back(new TestModule_2D_Scene());
     modules.push_back(new TestModule_3DRender());
-    modules.push_back(new TestModule_Sprite2D());
     modules.push_back(new TestModule_DragWindow());
     modules.push_back(new TestModule_Texture());
     modules.push_back(new TestModule_Music());
@@ -186,10 +180,9 @@ int main(int argc, char* argv[]) {
             // Route canvas-space events to the selected module (generic).
             //
             // Modules that override onCanvasMouseDown/Up/Move get render-target
-            // coordinates (Layout::CANVAS_W x CANVAS_H) -- this is what scene
-            // picking / picking helpers like TestModule_2D_Scene::pickObject3D
-            // and onWheel expect. Modules that don't override fall through to
-            // onMouse* below and receive raw screen coordinates instead.
+            // coordinates (Layout::CANVAS_W x CANVAS_H). Modules that don't
+            // override fall through to onMouse* below and receive raw screen
+            // coordinates instead.
             if (inCanvas) {
                 int cx = 0, cy = 0;
                 if (event.type == SDL_MOUSEMOTION) {
@@ -370,18 +363,6 @@ int main(int argc, char* argv[]) {
             ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "%s", modules[selectedModule]->getName());
             ImGui::Separator();
 
-            static int viewportMode_local = 0;
-            if (selectedModule >= 0 && selectedModule < (int)modules.size()) {
-                IModule* mod = modules[selectedModule];
-                if (auto* scene2d = dynamic_cast<TestModule_2D_Scene*>(mod)) {
-                    viewportMode_local = scene2d->getViewportMode();
-                } else {
-                    viewportMode_local = 0;
-                }
-            }
-            if (ImGui::RadioButton("Scene", viewportMode_local == 0)) { viewportMode_local = 0; if (selectedModule >= 0 && selectedModule < (int)modules.size()) { if (auto* s = dynamic_cast<TestModule_2D_Scene*>(modules[selectedModule])) s->setViewportMode(0); } }
-            ImGui::SameLine();
-            if (ImGui::RadioButton("Game", viewportMode_local == 1)) { viewportMode_local = 1; if (selectedModule >= 0 && selectedModule < (int)modules.size()) { if (auto* s = dynamic_cast<TestModule_2D_Scene*>(modules[selectedModule])) s->setViewportMode(1); } }
             ImGui::Separator();
 
             modules[selectedModule]->renderControls();
