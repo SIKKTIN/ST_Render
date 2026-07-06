@@ -1,4 +1,4 @@
-#include <imgui.h>
+﻿#include <imgui.h>
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <vector>
@@ -15,6 +15,10 @@
 #include "TestModule_Music.hpp"
 #include "TestModule_DragWindow.hpp"
 #include "TestModule_NetworkTest.hpp"
+#include "TestModule_ReviewAlpha.hpp"
+#include "TestModule_ReviewBeta.hpp"
+#include "TestModule_ReviewGamma.hpp"
+#include "TestModule_ReviewDelta.hpp"
 #include "engine/editor/TextureManager.hpp"
 #include "engine/editor/AudioManager.hpp"
 
@@ -72,18 +76,116 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<IModule*> modules;
-    modules.push_back(new TestModule_FrameBuffer());
-    modules.push_back(new TestModule_Rasterizer());
-    modules.push_back(new TestModule_3DRender());
-    modules.push_back(new TestModule_DragWindow());
-    modules.push_back(new TestModule_Texture());
-    modules.push_back(new TestModule_Music());
-    modules.push_back(new TestModule_NetworkTest());
-    modules.push_back(new TestModule_Circle());
-    modules.push_back(new TestModule_Rectangle());
+    // Module tree: a flat list of entries; each entry is either a leaf
+    // (a real IModule) or a folder-like "group" (e.g. Review).
+    //
+    // We build this in two stages:
+    //   1) Build a single list of all leaf modules.
+    //   2) Walk that list and emit a final `entries` list:
+    //        - a module whose getCategory() == "" becomes a top-level leaf
+    //        - a module whose getCategory() == "Review" (or any category)
+    //          becomes a child entry under the matching group
+    //      The group itself is emitted once per category, in the order
+    //      its first sub-module appears.  Children NEVER appear at the
+    //      top level, by construction.
+    struct ModuleLeaf {
+        IModule* mod;
+    };
+    struct ModuleGroup {
+        std::vector<IModule*> children;
+        const char* label = "";
+    };
+    struct ModuleEntry {
+        const char* label = "";
+        bool isGroup = false;
+        ModuleLeaf  leaf;
+        ModuleGroup group;
+        // For non-group entries, pointer to the group's slot in `groups`
+        // if this entry is a child; nullptr if top-level.
+        ModuleGroup* parent = nullptr;
+    };
 
+    // 1) Source of truth: every leaf module lives here.
+    std::vector<IModule*> allLeaves = {
+        new TestModule_FrameBuffer(),
+        new TestModule_Rasterizer(),
+        new TestModule_3DRender(),
+        new TestModule_DragWindow(),
+        new TestModule_Texture(),
+        new TestModule_Music(),
+        new TestModule_NetworkTest(),
+        new TestModule_Circle(),
+        new TestModule_Rectangle(),
+        new TestModule_ReviewAlpha(),
+        new TestModule_ReviewBeta(),
+        new TestModule_ReviewGamma(),
+        new TestModule_ReviewDelta(),
+    };
+
+    // 2) Aggregate by category.  `groups` keeps stable addresses for
+    //    each category so we can point entries.parent at them.
+    std::vector<ModuleGroup> groups;
+    auto findOrCreateGroup = [&](const char* cat) -> ModuleGroup* {
+        for (auto& g : groups) if (std::strcmp(g.label, cat) == 0) return &g;
+        groups.push_back(ModuleGroup{ {}, cat });
+        return &groups.back();
+    };
+
+    std::vector<ModuleEntry> entries;
+    for (IModule* m : allLeaves) {
+        const char* cat = m->getCategory();
+        if (cat && cat[0] != '\0') {
+            ModuleGroup* g = findOrCreateGroup(cat);
+            g->children.push_back(m);
+            entries.push_back({ m->getName(), false, { m }, {}, g });
+        } else {
+            entries.push_back({ m->getName(), false, { m }, {}, nullptr });
+        }
+    }
+
+    // 3) Re-order so the final layout is:
+    //      [top-level leaves] then, per group: [group entry, its children].
+    //      This matches what the user sees in the left panel.
+    std::vector<ModuleEntry> ordered;
+    for (auto& e : entries) {
+        if (!e.isGroup && e.parent == nullptr) ordered.push_back(e);
+    }
+    for (auto& g : groups) {
+        ordered.push_back({ g.label, true, {}, { g.children, g.label }, nullptr });
+        for (auto& e : entries) {
+            if (e.parent == &g) ordered.push_back(e);
+        }
+    }
+    entries = std::move(ordered);
+
+    // Default selection: first leaf module (Frame Buffer).
     int selectedModule = 0;
+    auto selectedLeaf = [&]() -> IModule* {
+        if (selectedModule < 0 || selectedModule >= (int)entries.size()) return nullptr;
+        if (entries[selectedModule].isGroup) return nullptr;
+        return entries[selectedModule].leaf.mod;
+    };
+    auto deliverToLeaf = [&](auto&& fn) {
+        if (auto* m = selectedLeaf()) fn(m);
+    };
+    auto findNextLeaf = [&](int startAfter, int dir) -> int {
+        // dir = +1 for next, -1 for prev. Skips groups.
+        for (int i = startAfter + dir; i >= 0 && i < (int)entries.size(); i += dir) {
+            if (!entries[i].isGroup) return i;
+        }
+        return startAfter;
+    };
+    auto firstLeafInGroup = [&](const ModuleGroup& g) -> int {
+        const auto& kids = g.children;
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (!entries[i].isGroup) {
+                for (IModule* k : kids) {
+                    if (entries[i].leaf.mod == k) return (int)i;
+                }
+            }
+        }
+        return -1;
+    };
     std::string consoleOutput;
     float consoleHeight = 120.0f;
     float createObjPanelW = Layout::CREATE_PANEL_W;
@@ -105,12 +207,14 @@ int main(int argc, char* argv[]) {
     );
 
     auto runModule = [&](int index, bool rerender = true) {
-        if (index < 0 || index >= (int)modules.size()) return;
+        if (index < 0 || index >= (int)entries.size()) return;
+        if (entries[index].isGroup) return;
+        IModule* m = entries[index].leaf.mod;
         consoleOutput.clear();
-        modules[index]->runConsole(consoleOutput);
+        m->runConsole(consoleOutput);
         if (rerender) {
             SDL_SetRenderTarget(renderer, canvas);
-            modules[index]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
         }
     };
@@ -141,8 +245,9 @@ int main(int argc, char* argv[]) {
     ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer2_Init(renderer);
 
-    for (auto* m : modules) {
-        m->setRenderer(renderer);
+    // Hand the SDL renderer to every leaf so modules can upload textures.
+    for (const auto& e : entries) {
+        if (!e.isGroup) e.leaf.mod->setRenderer(renderer);
     }
 
     bool running = true;
@@ -154,7 +259,7 @@ int main(int argc, char* argv[]) {
 
             if (event.type == SDL_QUIT) running = false;
             if (event.type == SDL_KEYDOWN) {
-                modules[selectedModule]->onKeyDown(event.key.keysym.sym);
+                deliverToLeaf([&](IModule* m) { m->onKeyDown(event.key.keysym.sym); });
                 if (event.key.keysym.sym == SDLK_ESCAPE) running = false;
             }
 
@@ -199,7 +304,7 @@ int main(int argc, char* argv[]) {
                     mouseX = event.button.x;
                     mouseY = event.button.y;
                 }
-                auto* mod = modules[selectedModule];
+                auto* mod = selectedLeaf();
                 if (event.type == SDL_MOUSEMOTION) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
@@ -249,7 +354,7 @@ int main(int argc, char* argv[]) {
                                       wx >= canvasMinX && wx < canvasMaxX &&
                                       wy >= canvasMinY && wy < canvasMaxY);
 
-                if (wheelInCanvas && selectedModule >= 0 && selectedModule < (int)modules.size()) {
+                if (wheelInCanvas && selectedModule >= 0 && selectedModule < (int)entries.size() && !entries[selectedModule].isGroup) {
                     // Modules expect render-target coordinates (Layout::CANVAS_W × CANVAS_H).
                     // The on-screen Image rect may differ from the render-target size
                     // (Y differs whenever consoleHeight != 0; X coincides by current
@@ -258,7 +363,7 @@ int main(int argc, char* argv[]) {
                     int screenH = canvasMaxY - canvasMinY;
                     int cx = (wx - canvasMinX) * Layout::CANVAS_W / screenW;
                     int cy = (wy - canvasMinY) * Layout::CANVAS_H / screenH;
-                    modules[selectedModule]->onWheel(
+                    entries[selectedModule].leaf.mod->onWheel(
                         (float)event.wheel.x, (float)event.wheel.y,
                         cx, cy, Layout::CANVAS_W, Layout::CANVAS_H
                     );
@@ -266,14 +371,14 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (modules[selectedModule]->needsRealTimeUpdate()) {
+        if (auto* m = selectedLeaf(); m && m->needsRealTimeUpdate()) {
             Uint64 now = SDL_GetPerformanceCounter();
             static Uint64 last = now;
             float dt = (float)(now - last) / SDL_GetPerformanceFrequency();
             last = now;
-            modules[selectedModule]->update(dt);
+            m->update(dt);
             SDL_SetRenderTarget(renderer, canvas);
-            modules[selectedModule]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
             runModule(selectedModule, false);
         }
@@ -343,9 +448,40 @@ int main(int argc, char* argv[]) {
             ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "Test Manager");
             ImGui::Separator();
 
-            for (size_t i = 0; i < modules.size(); ++i) {
-                if (ImGui::Selectable(modules[i]->getName(), selectedModule == (int)i, 0, ImVec2(180, 0))) {
-                    if (selectedModule != (int)i) { selectedModule = (int)i; runModule(selectedModule); }
+            // Render only top-level entries (parent == nullptr). Sub-modules of a
+            // group live inside the group's TreeNode and are never shown
+            // at the top level.
+            for (size_t i = 0; i < entries.size(); ++i) {
+                const auto& e = entries[i];
+                if (e.parent != nullptr) continue;
+                if (!e.isGroup) {
+                    if (ImGui::Selectable(e.label, selectedModule == (int)i, 0, ImVec2(180, 0))) {
+                        if (selectedModule != (int)i) { selectedModule = (int)i; runModule(selectedModule); }
+                    }
+                } else {
+                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                                               ImGuiTreeNodeFlags_SpanFullWidth;
+                    bool open = ImGui::TreeNodeEx((void*)(intptr_t)i, flags, "%s", e.label);
+                    if (open) {
+                        // Children come straight from the group's children
+                        // list. Each child is also an entry (so its index
+                        // is a valid `selectedModule`).
+                        const auto& kids = e.group.children;
+                        for (size_t j = 0; j < entries.size(); ++j) {
+                            const auto& c = entries[j];
+                            if (c.isGroup) continue;
+                            bool isThisGroupChild = false;
+                            for (IModule* k : kids) if (c.leaf.mod == k) { isThisGroupChild = true; break; }
+                            if (!isThisGroupChild) continue;
+                            ImGui::Indent();
+                            if (ImGui::Selectable(c.label, selectedModule == (int)j, 0, ImVec2(160, 0))) {
+                                if (selectedModule != (int)j) { selectedModule = (int)j; runModule(selectedModule); }
+                            }
+                            ImGui::Unindent();
+                        }
+                        ImGui::TreePop();
+                    }
                 }
             }
 
@@ -360,12 +496,13 @@ int main(int argc, char* argv[]) {
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
 
-            ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "%s", modules[selectedModule]->getName());
+            ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "%s",
+                               selectedLeaf() ? selectedLeaf()->getName() : entries[selectedModule].label);
             ImGui::Separator();
 
             ImGui::Separator();
 
-            modules[selectedModule]->renderControls();
+            if (auto* m = selectedLeaf()) m->renderControls();
 
             ImGui::End();
         }
@@ -377,12 +514,12 @@ int main(int argc, char* argv[]) {
             ImGui::Begin("Create Object", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
-            modules[selectedModule]->renderCreatePanel();
+            if (auto* m = selectedLeaf()) m->renderCreatePanel();
             ImGui::End();
         }
 
         // Call module overlays (e.g. popup windows) after all panels are closed
-        modules[selectedModule]->renderOverlays();
+        if (auto* m = selectedLeaf()) m->renderOverlays();
 
         // Canvas + Console (with splitter)
         {
@@ -393,8 +530,9 @@ int main(int argc, char* argv[]) {
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
 
-            if (selectedModule >= 0 && selectedModule < (int)modules.size()) {
-                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "%s", modules[selectedModule]->getName());
+            if (selectedModule >= 0 && selectedModule < (int)entries.size()) {
+                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "%s",
+                                   selectedLeaf() ? selectedLeaf()->getName() : entries[selectedModule].label);
                 ImGui::Separator();
 
                 float splitterH = 8.0f;
@@ -416,8 +554,10 @@ int main(int argc, char* argv[]) {
                 canvasMinY = (int)cMin.y;
                 canvasMaxX = (int)cMax.x;
                 canvasMaxY = (int)cMax.y;
-                modules[selectedModule]->renderUIOverlay(
-                    canvasMinX, canvasMinY, (int)canvasW, (int)thisCanvasH);
+                if (auto* m = selectedLeaf()) {
+                    m->renderUIOverlay(
+                        canvasMinX, canvasMinY, (int)canvasW, (int)thisCanvasH);
+                }
 
                 ImGui::Button("##Splitter", ImVec2(-1, splitterH));
 
@@ -489,15 +629,17 @@ int main(int argc, char* argv[]) {
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
 
-        if (modules[selectedModule]->needsRerender) {
-            modules[selectedModule]->needsRerender = false;
+        if (auto* m = selectedLeaf(); m && m->needsRerender) {
+            m->needsRerender = false;
             SDL_SetRenderTarget(renderer, canvas);
-            modules[selectedModule]->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
             SDL_SetRenderTarget(renderer, nullptr);
         }
     }
 
-    for (auto* m : modules) delete m;
+    // All leaf modules are owned by `allLeaves`; delete them once at the
+    // end. Group entries have no extra resources to free.
+    for (IModule* m : allLeaves) delete m;
     SDL_DestroyTexture(canvas);
     ImGui_ImplSDLRenderer2_Shutdown();
     ImGui_ImplSDL2_Shutdown();

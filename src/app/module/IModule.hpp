@@ -7,6 +7,11 @@ public:
     virtual ~IModule() = default;
 
     virtual const char* getName() const = 0;
+
+    // Optional UI category. Modules with the same non-empty category
+    // are aggregated under a folder-like node in the left-side panel
+    // instead of appearing as top-level entries. Default: no category.
+    virtual const char* getCategory() const { return ""; }
     virtual bool hasRenderOutput() const { return true; }
     virtual bool hasConsoleOutput() const { return true; }
     virtual bool needsRealTimeUpdate() const { return false; }
