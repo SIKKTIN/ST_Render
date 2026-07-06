@@ -12,10 +12,10 @@ add_executable(ST_Render_Manager
     TestModule_Texture.cpp
     TestModule_Music.cpp
     TestModule_NetworkTest.cpp
-    TestModule_ReviewAlpha.cpp
-    TestModule_ReviewBeta.cpp
-    TestModule_ReviewGamma.cpp
-    TestModule_ReviewDelta.cpp
+    ../module/review/TestModule_ReviewAlpha.cpp
+    ../module/review/TestModule_ReviewBeta.cpp
+    ../module/review/TestModule_ReviewGamma.cpp
+    ../module/review/TestModule_ReviewDelta.cpp
     imgui_impl_sdl2.cpp
     imgui_impl_sdlrenderer2.cpp
 )
