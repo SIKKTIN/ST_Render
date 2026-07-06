@@ -12,7 +12,7 @@ add_executable(ST_Render_Manager
     TestModule_Texture.cpp
     TestModule_Music.cpp
     TestModule_NetworkTest.cpp
-    ../module/review/TestModule_ReviewAlpha.cpp
+    ../module/review/TestModule_ReviewMath.cpp
     ../module/review/TestModule_ReviewBeta.cpp
     ../module/review/TestModule_ReviewGamma.cpp
     ../module/review/TestModule_ReviewDelta.cpp

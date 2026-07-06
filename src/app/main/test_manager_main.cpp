@@ -15,7 +15,7 @@
 #include "TestModule_Music.hpp"
 #include "TestModule_DragWindow.hpp"
 #include "TestModule_NetworkTest.hpp"
-#include "app/module/review/TestModule_ReviewAlpha.hpp"
+#include "app/module/review/TestModule_ReviewMath.hpp"
 #include "app/module/review/TestModule_ReviewBeta.hpp"
 #include "app/module/review/TestModule_ReviewGamma.hpp"
 #include "app/module/review/TestModule_ReviewDelta.hpp"
@@ -35,6 +35,8 @@ namespace Layout {
     constexpr float RIGHT_PANEL_W     = 220.0f;
     constexpr float CREATE_PANEL_MIN  = 80.0f;
     constexpr float CREATE_PANEL_MAX  = 400.0f;
+    constexpr float RIGHT_PANEL_MIN   = 120.0f;
+    constexpr float RIGHT_PANEL_MAX   = 480.0f;
     constexpr float TOP_AREA_H        = 550.0f;     // controls panel height
     constexpr int   CANVAS_W          = 640;        // render-target size
     constexpr int   CANVAS_H          = 480;        // render-target size
@@ -116,7 +118,7 @@ int main(int argc, char* argv[]) {
         new TestModule_NetworkTest(),
         new TestModule_Circle(),
         new TestModule_Rectangle(),
-        new TestModule_ReviewAlpha(),
+        new TestModule_ReviewMath(),
         new TestModule_ReviewBeta(),
         new TestModule_ReviewGamma(),
         new TestModule_ReviewDelta(),
@@ -193,6 +195,7 @@ int main(int argc, char* argv[]) {
     float rightPanelW     = Layout::RIGHT_PANEL_W;
     bool draggingSplitter = false;
     bool draggingCreateSplitter = false;
+    bool draggingRightSplitter = false;
     int mouseX = 0, mouseY = 0;
 
     // Track canvas screen bounds (set during ImGui render, used in event loop)
@@ -612,8 +615,47 @@ int main(int argc, char* argv[]) {
                     if (createObjPanelW < Layout::CREATE_PANEL_MIN) createObjPanelW = Layout::CREATE_PANEL_MIN;
                     if (createObjPanelW > Layout::CREATE_PANEL_MAX) createObjPanelW = Layout::CREATE_PANEL_MAX;
                 }
-            } else if (ImGui::IsItemClicked(0)) {
+            } else             if (ImGui::IsItemClicked(0)) {
                 draggingCreateSplitter = true;
+            }
+
+            ImGui::End();
+        }
+
+        // Right vertical splitter (between canvas and Controls panel).
+        // Mirrors the create-side splitter: dragging left squeezes the
+        // canvas and widens Controls; dragging right narrows Controls.
+        // The X axis is the right panel's left edge (= WINDOW_W - rightPanelW).
+        {
+            float handleX = (float)Layout::WINDOW_W - rightPanelW - Layout::SPLITTER_HALF_W;
+            ImGui::SetNextWindowPos(ImVec2(handleX, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, windowH));
+            ImGui::Begin("##RightVSplitter", nullptr,
+                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoBackground);
+
+            ImGui::InvisibleButton("##RightVSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, windowH));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            ImVec2 wp = ImGui::GetWindowPos();
+            ImU32 col = IM_COL32(55, 55, 55, 255);
+            if (ImGui::IsItemHovered() || draggingRightSplitter) col = IM_COL32(80, 130, 255, 255);
+            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + windowH), col);
+
+            if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            if (draggingRightSplitter) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                if (!ImGui::IsMouseDown(0)) {
+                    draggingRightSplitter = false;
+                } else {
+                    // Dragging right (positive dx) shrinks the right panel;
+                    // dragging left widens it.
+                    rightPanelW -= ImGui::GetIO().MouseDelta.x;
+                    if (rightPanelW < Layout::RIGHT_PANEL_MIN) rightPanelW = Layout::RIGHT_PANEL_MIN;
+                    if (rightPanelW > Layout::RIGHT_PANEL_MAX) rightPanelW = Layout::RIGHT_PANEL_MAX;
+                }
+            } else if (ImGui::IsItemClicked(0)) {
+                draggingRightSplitter = true;
             }
 
             ImGui::End();
