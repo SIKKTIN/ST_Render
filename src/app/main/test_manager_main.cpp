@@ -1,7 +1,8 @@
-﻿#include <imgui.h>
+#include <imgui.h>
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <vector>
+#include <cstring>
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
@@ -227,6 +228,11 @@ int main(int argc, char* argv[]) {
     ImGui::CreateContext();
 
     auto applyTheme = [](Theme t) {
+        // ImGui 1.91+ removed the public InputTextBlinkTime knob, so we
+        // can't slow the caret.  Disable blinking entirely so the caret
+        // stays solid while a text field has focus.
+        ImGui::GetIO().ConfigInputTextCursorBlink = false;
+
         if (t == Theme::Dark) {
             ImGui::StyleColorsDark();
             ImGui::GetStyle().Colors[ImGuiCol_MenuBarBg] = ImVec4(0.10f, 0.10f, 0.12f, 1.0f);
@@ -582,7 +588,48 @@ int main(int argc, char* argv[]) {
 
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Console Output:");
                 ImGui::BeginChild("Console", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
-                ImGui::TextUnformatted(consoleOutput.c_str());
+                // Selection-friendly read-only viewer: wrap consoleOutput in
+                // an InputTextMultiline so the user can drag-select and
+                // Ctrl+C.  The buffer is fixed-size; if the console text
+                // exceeds the cap, only the leading bytes are shown (rare
+                // in practice -- none of today's modules come close).
+                {
+                    constexpr size_t kConsoleBufCap = 64 * 1024;
+                    static std::vector<char> consoleBuf;
+                    if (consoleBuf.size() != kConsoleBufCap + 1) {
+                        consoleBuf.assign(kConsoleBufCap + 1, '\0');
+                    }
+                    size_t copyLen = std::min(consoleOutput.size(), kConsoleBufCap);
+                    if (copyLen > 0) {
+                        std::memcpy(consoleBuf.data(), consoleOutput.data(), copyLen);
+                    }
+                    consoleBuf[copyLen] = '\0';
+                    // If truncated, the user sees a visible marker so they
+                    // know the displayed text isn't the full thing.
+                    if (consoleOutput.size() > kConsoleBufCap) {
+                        static const char truncated[] =
+                            "\n\n[console output truncated for display; "
+                            "use the Copy button below to get the full text]";
+                        size_t tlen = sizeof(truncated) - 1;
+                        if (copyLen + tlen <= kConsoleBufCap) {
+                            std::memcpy(consoleBuf.data() + copyLen, truncated, tlen);
+                            consoleBuf[copyLen + tlen] = '\0';
+                        }
+                    }
+
+                    ImGui::InputTextMultiline(
+                        "##ConsoleReadOnly",
+                        consoleBuf.data(),
+                        consoleBuf.size(),
+                        ImVec2(-1, -1),
+                        ImGuiInputTextFlags_ReadOnly);
+
+                    if (ImGui::Button("Copy console output")) {
+                        ImGui::SetClipboardText(consoleOutput.c_str());
+                    }
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(or drag-select + Ctrl+C in the box above)");
+                }
                 ImGui::EndChild();
             }
 

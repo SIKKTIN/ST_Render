@@ -44,8 +44,10 @@ inline void test_Matrix4x4_Identity(review::math::ReviewCtx& ctx) {
     EXPECT_TRUE(ctx, (A * I) == A);
     EXPECT_TRUE(ctx, (I * A) == A);
 
-    // Zero * v == 0 (homogeneous trick: (0,0,0,1) stays at origin)
-    EXPECT_TRUE(ctx, (Z * v1) == Vector4(0, 0, 0, 1));
+    // Zero * v == 0 in all four components, including w.  The zero matrix
+    // has no m[3][3] == 1, so the "homogeneous w stays 1" trick does not
+    // apply -- multiplying any vector by an all-zero matrix annihilates it.
+    EXPECT_TRUE(ctx, (Z * v1) == Vector4(0, 0, 0, 0));
 
     if (!ctx.currentFailed) ++ctx.passed; else ++ctx.failed;
 }
@@ -226,23 +228,44 @@ inline void test_Matrix4x4_Rotation(review::math::ReviewCtx& ctx) {
     checkOrthogonal(Rz30, "rotationZ(30)");
 
     // rotationX(90deg): y-axis -> z-axis, z-axis -> -y-axis
+    //
+    // These involve cos(pi/2) and sin(pi/2) and so cannot be compared
+    // bitwise -- IEEE-754 gives ~6.12e-17 residual.  Use EXPECT_NEAR
+    // per component, matching the convention already used elsewhere
+    // in this file (checkOrthogonal above, RzFull below).
     Vector3 yAxis(0, 1, 0);
     Vector3 yRot = Rx90.transformDirection(yAxis);
-    EXPECT_TRUE(ctx, yRot == Vector3(0, 0, 1));
+    EXPECT_NEAR(ctx, yRot.x, 0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yRot.y, 0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yRot.z, 1.0f, ST::EPSILON);
 
     Vector3 zAxis(0, 0, 1);
     Vector3 zRot = Rx90.transformDirection(zAxis);
-    EXPECT_TRUE(ctx, zRot == Vector3(0, -1, 0));
+    EXPECT_NEAR(ctx, zRot.x,  0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zRot.y, -1.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zRot.z,  0.0f, ST::EPSILON);
 
     // rotationY(90deg): z -> x, x -> -z
     Matrix4x4 Ry90 = Matrix4x4::rotationY(ST::degreesToRadians(90.0f));
-    EXPECT_TRUE(ctx, Ry90.transformDirection(Vector3(0, 0, 1)) == Vector3(1, 0, 0));
-    EXPECT_TRUE(ctx, Ry90.transformDirection(Vector3(1, 0, 0)) == Vector3(0, 0, -1));
+    Vector3 yZ = Ry90.transformDirection(Vector3(0, 0, 1));
+    EXPECT_NEAR(ctx, yZ.x,  1.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yZ.y,  0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yZ.z,  0.0f, ST::EPSILON);
+    Vector3 yX = Ry90.transformDirection(Vector3(1, 0, 0));
+    EXPECT_NEAR(ctx, yX.x,  0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yX.y,  0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, yX.z, -1.0f, ST::EPSILON);
 
     // rotationZ(90deg): x -> y, y -> -x
     Matrix4x4 Rz90 = Matrix4x4::rotationZ(ST::degreesToRadians(90.0f));
-    EXPECT_TRUE(ctx, Rz90.transformDirection(Vector3(1, 0, 0)) == Vector3(0, 1, 0));
-    EXPECT_TRUE(ctx, Rz90.transformDirection(Vector3(0, 1, 0)) == Vector3(-1, 0, 0));
+    Vector3 zX = Rz90.transformDirection(Vector3(1, 0, 0));
+    EXPECT_NEAR(ctx, zX.x, 0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zX.y, 1.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zX.z, 0.0f, ST::EPSILON);
+    Vector3 zY = Rz90.transformDirection(Vector3(0, 1, 0));
+    EXPECT_NEAR(ctx, zY.x, -1.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zY.y,  0.0f, ST::EPSILON);
+    EXPECT_NEAR(ctx, zY.z,  0.0f, ST::EPSILON);
 
     // rotationZ(360deg) should equal identity (transcendentals -- use slop).
     Matrix4x4 RzFull = Matrix4x4::rotationZ(ST::degreesToRadians(360.0f));
