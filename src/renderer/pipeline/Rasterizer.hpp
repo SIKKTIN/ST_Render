@@ -90,13 +90,21 @@ public:
     static T perspectiveCorrect(const Vector3& bary,
         const T& attr0, const T& attr1, const T& attr2,
         float w0, float w1, float w2) {
+        if (std::fabs(w0) <= EPSILON || std::fabs(w1) <= EPSILON || std::fabs(w2) <= EPSILON) {
+            return linearInterpolate(bary, attr0, attr1, attr2);
+        }
+
         float oneOverW0 = 1.0f / w0;
         float oneOverW1 = 1.0f / w1;
         float oneOverW2 = 1.0f / w2;
         float factor0 = bary.x * oneOverW0;
         float factor1 = bary.y * oneOverW1;
         float factor2 = bary.z * oneOverW2;
-        float invSum = 1.0f / (factor0 + factor1 + factor2);
+        float sum = factor0 + factor1 + factor2;
+        if (std::fabs(sum) <= EPSILON) {
+            return linearInterpolate(bary, attr0, attr1, attr2);
+        }
+        float invSum = 1.0f / sum;
         return (attr0 * factor0 + attr1 * factor1 + attr2 * factor2) * invSum;
     }
 
@@ -108,6 +116,10 @@ public:
         Vector2 s1 = toScreenSpace(v1);
         Vector2 s2 = toScreenSpace(v2);
 
+        const float area = (s1.x - s0.x) * (s2.y - s0.y)
+                         - (s1.y - s0.y) * (s2.x - s0.x);
+        if (!std::isfinite(area) || std::fabs(area) <= EPSILON) return;
+
         int minX = static_cast<int>(std::max(0.0f, std::min({ s0.x, s1.x, s2.x })));
         int maxX = static_cast<int>(std::min((float)m_width - 1, std::max({ s0.x, s1.x, s2.x })));
         int minY = static_cast<int>(std::max(0.0f, std::min({ s0.y, s1.y, s2.y })));
@@ -116,6 +128,9 @@ public:
         float w0 = v0.position.w;
         float w1 = v1.position.w;
         float w2 = v2.position.w;
+        Vector3 ndc0 = v0.toNDC();
+        Vector3 ndc1 = v1.toNDC();
+        Vector3 ndc2 = v2.toNDC();
 
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {
@@ -123,15 +138,15 @@ public:
                 Vector3 bary = computeBarycentric(p, s0, s1, s2);
 
                 if (bary.x >= -EPSILON && bary.y >= -EPSILON && bary.z >= -EPSILON) {
-                    float depth = perspectiveCorrect<float>(bary, v0.position.z, v1.position.z, v2.position.z, w0, w1, w2);
+                    float depth = linearInterpolate<float>(bary, ndc0.z, ndc1.z, ndc2.z);
 
                     if (!m_depthBuffer || m_depthBuffer->testAndSet(x, y, depth)) {
                         VertexOut frag;
-                        frag.color = linearInterpolate<Color>(bary, v0.color, v1.color, v2.color);
+                        frag.color = perspectiveCorrect<Color>(bary, v0.color, v1.color, v2.color, w0, w1, w2);
                         frag.position = Vector4((float)x, (float)y, depth, 1.0f);
-                        frag.worldPosition = v0.worldPosition * bary.x + v1.worldPosition * bary.y + v2.worldPosition * bary.z;
-                        frag.normal = v0.normal * bary.x + v1.normal * bary.y + v2.normal * bary.z;
-                        frag.texCoord = v0.texCoord * bary.x + v1.texCoord * bary.y + v2.texCoord * bary.z;
+                        frag.worldPosition = perspectiveCorrect<Vector3>(bary, v0.worldPosition, v1.worldPosition, v2.worldPosition, w0, w1, w2);
+                        frag.normal = perspectiveCorrect<Vector3>(bary, v0.normal, v1.normal, v2.normal, w0, w1, w2).normalized();
+                        frag.texCoord = perspectiveCorrect<Vector2>(bary, v0.texCoord, v1.texCoord, v2.texCoord, w0, w1, w2);
 
                         Color finalColor = fragmentShader(frag);
                         m_frameBuffer->setPixel(x, y, finalColor);

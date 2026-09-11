@@ -29,6 +29,8 @@ namespace ST {
         void addLight(const Light& light) { m_fragmentShader.addLight(light); }
         void setModelMatrix(const Matrix4x4& mat);
         void setViewMatrix(const Matrix4x4& mat);
+        void setBackFaceCulling(bool enabled) { m_backFaceCulling = enabled; }
+        bool isBackFaceCullingEnabled() const { return m_backFaceCulling; }
 
     private:
         void setupUniforms();
@@ -43,5 +45,6 @@ namespace ST {
         VertexShader m_vertexShader;
         FragmentShader m_fragmentShader;
         Rasterizer m_rasterizer;
+        bool m_backFaceCulling;
     };
 }
