@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <stdexcept>
+#include <algorithm>
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
@@ -60,13 +61,16 @@ int main(int argc, char* argv[]) {
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         Layout::WINDOW_W, Layout::WINDOW_H,
-        SDL_WINDOW_SHOWN
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
     );
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
         SDL_Quit();
         return 1;
     }
+    SDL_SetWindowMinimumSize(window, 900, 500);
+    int windowWidth = Layout::WINDOW_W;
+    int windowHeight = Layout::WINDOW_H;
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
@@ -531,6 +535,7 @@ int main(int argc, char* argv[]) {
     controlBridge.updateState(buildControlState(), true);
 
     while (running) {
+        SDL_GetWindowSize(window, &windowWidth, &windowHeight);
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
@@ -671,8 +676,6 @@ int main(int argc, char* argv[]) {
         ImGui_ImplSDLRenderer2_NewFrame();
         ImGui::NewFrame();
 
-        float topAreaH = Layout::TOP_AREA_H;
-
         // Top menu bar (File / Edit / View / Help). Sits above all panels;
         // all panels below are pushed down by the *actual* menu bar height,
         // queried from ImGui after rendering, so they sit flush against the
@@ -719,12 +722,13 @@ int main(int argc, char* argv[]) {
             ImGui::EndMainMenuBar();
         }
 
-        float windowH = (float)Layout::WINDOW_H - menuBarH;
+        const float contentH = std::max(100.0f, static_cast<float>(windowHeight) - menuBarH);
+        const float contentW = std::max(100.0f, static_cast<float>(windowWidth));
 
         // Left panel - Test list
         {
             ImGui::SetNextWindowPos(ImVec2(0, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(leftPanelW, windowH));
+            ImGui::SetNextWindowSize(ImVec2(leftPanelW, contentH));
             ImGui::Begin("Tests", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -792,8 +796,8 @@ int main(int argc, char* argv[]) {
 
         // Right panel - Controls
         {
-            ImGui::SetNextWindowPos(ImVec2((float)Layout::WINDOW_W - rightPanelW, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(rightPanelW, topAreaH - menuBarH));
+            ImGui::SetNextWindowPos(ImVec2(contentW - rightPanelW, menuBarH));
+            ImGui::SetNextWindowSize(ImVec2(rightPanelW, contentH));
             ImGui::Begin("Controls", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -812,7 +816,7 @@ int main(int argc, char* argv[]) {
         // Create Object panel (left of canvas, above console)
         {
             ImGui::SetNextWindowPos(ImVec2(leftPanelW, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(createObjPanelW, windowH));
+            ImGui::SetNextWindowSize(ImVec2(createObjPanelW, contentH));
             ImGui::Begin("Create Object", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -825,9 +829,9 @@ int main(int argc, char* argv[]) {
 
         // Canvas + Console (with splitter)
         {
-            float canvasW = (float)Layout::WINDOW_W - leftPanelW - createObjPanelW - rightPanelW;
+            float canvasW = std::max(100.0f, contentW - leftPanelW - createObjPanelW - rightPanelW);
             ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(canvasW, windowH));
+            ImGui::SetNextWindowSize(ImVec2(canvasW, contentH));
             ImGui::Begin("Output", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -932,18 +936,18 @@ int main(int argc, char* argv[]) {
         // Vertical splitter (on top of everything)
         {
             ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW - Layout::SPLITTER_HALF_W, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, windowH));
+            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, contentH));
             ImGui::Begin("##VSplitter", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                 ImGuiWindowFlags_NoBackground);
 
-            ImGui::InvisibleButton("##VSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, windowH));
+            ImGui::InvisibleButton("##VSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, contentH));
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 wp = ImGui::GetWindowPos();
             ImU32 col = IM_COL32(55, 55, 55, 255);
             if (ImGui::IsItemHovered() || draggingCreateSplitter) col = IM_COL32(80, 130, 255, 255);
-            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + windowH), col);
+            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + contentH), col);
 
             if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
             if (draggingCreateSplitter) {
@@ -967,20 +971,20 @@ int main(int argc, char* argv[]) {
         // canvas and widens Controls; dragging right narrows Controls.
         // The X axis is the right panel's left edge (= WINDOW_W - rightPanelW).
         {
-            float handleX = (float)Layout::WINDOW_W - rightPanelW - Layout::SPLITTER_HALF_W;
+            float handleX = contentW - rightPanelW - Layout::SPLITTER_HALF_W;
             ImGui::SetNextWindowPos(ImVec2(handleX, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, windowH));
+            ImGui::SetNextWindowSize(ImVec2(2 * Layout::SPLITTER_HALF_W, contentH));
             ImGui::Begin("##RightVSplitter", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                 ImGuiWindowFlags_NoBackground);
 
-            ImGui::InvisibleButton("##RightVSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, windowH));
+            ImGui::InvisibleButton("##RightVSplitterBtn", ImVec2(2.0f * Layout::SPLITTER_HALF_W, contentH));
             ImDrawList* dl = ImGui::GetWindowDrawList();
             ImVec2 wp = ImGui::GetWindowPos();
             ImU32 col = IM_COL32(55, 55, 55, 255);
             if (ImGui::IsItemHovered() || draggingRightSplitter) col = IM_COL32(80, 130, 255, 255);
-            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + windowH), col);
+            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + contentH), col);
 
             if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
             if (draggingRightSplitter) {
