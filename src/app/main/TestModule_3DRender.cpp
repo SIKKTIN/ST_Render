@@ -404,8 +404,13 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // Dense meshes are fill-rate bound in the software rasterizer. During a
     // camera drag, render a half-resolution preview and let SDL upscale it;
     // mouse release schedules a sharp full-resolution frame.
-    const int renderW = m_interactionActive ? std::max(1, canvasW / 2) : canvasW;
-    const int renderH = m_interactionActive ? std::max(1, canvasH / 2) : canvasH;
+    const int qualityScale = (!m_interactionActive && m_supersampleEnabled) ? 2 : 1;
+    const int renderW = m_interactionActive
+        ? std::max(1, canvasW / 2)
+        : canvasW * qualityScale;
+    const int renderH = m_interactionActive
+        ? std::max(1, canvasH / 2)
+        : canvasH * qualityScale;
 
     if (m_frameBuffer == nullptr || m_canvasW != renderW || m_canvasH != renderH) {
         rebuildBuffers(renderW, renderH);
@@ -491,6 +496,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
         m_outputTextureW != renderW || m_outputTextureH != renderH) {
         if (m_outputTexture) SDL_DestroyTexture(m_outputTexture);
         m_sdlRenderer = renderer;
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
         m_outputTexture = SDL_CreateTexture(renderer,
             SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_STREAMING,
@@ -535,6 +541,7 @@ bool TestModule_3DRender::renderControls() {
     changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
     changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
     changed |= ImGui::Checkbox("Flat shading", &m_flatShading);
+    changed |= ImGui::Checkbox("2x final supersampling", &m_supersampleEnabled);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Off: interpolate vertex normals (smooth)\nOn: use one geometric normal per triangle");
     }

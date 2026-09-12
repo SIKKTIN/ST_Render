@@ -91,6 +91,7 @@ private:
     ST::Vector3 m_ambientLight;
     bool m_lightingEnabled;
     bool m_flatShading = false;
+    bool m_supersampleEnabled = true;
     bool m_showLightGizmo = true;
     bool m_lightDragActive = false;
     int m_lightGizmoScreenX = 0;

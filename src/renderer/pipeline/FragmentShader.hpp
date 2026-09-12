@@ -97,6 +97,7 @@ namespace ST {
 
 		void setTexture(const std::vector<Color>& texture, int width, int height);
 		Color sampleTexture(const Vector2& uv);
+		Color sampleTextureBilinear(const Vector2& uv);
 		Color sampleTextureClamp(const Vector2& uv);
 	private:
 		Material m_material;

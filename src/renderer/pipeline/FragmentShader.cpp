@@ -44,6 +44,10 @@ namespace ST {
 	}
 
 	Color FragmentShader::sampleTexture(const Vector2& uv) {
+		return sampleTextureBilinear(uv);
+	}
+
+	Color FragmentShader::sampleTextureBilinear(const Vector2& uv) {
 		if (!m_hasTexture) {
 			return Color::white();
 		}
@@ -53,9 +57,24 @@ namespace ST {
 		if (u < 0) u += 1.0f;
 		if (v < 0) v += 1.0f;
 
-		int x = static_cast<int>(u * m_textureWidth) % m_textureWidth;
-		int y = static_cast<int>(v * m_textureHeight) % m_textureHeight;
-		return m_texture[y * m_textureWidth + x];
+		const float x = u * static_cast<float>(m_textureWidth) - 0.5f;
+		const float y = v * static_cast<float>(m_textureHeight) - 0.5f;
+		const int x0 = static_cast<int>(std::floor(x));
+		const int y0 = static_cast<int>(std::floor(y));
+		const float fx = x - static_cast<float>(x0);
+		const float fy = y - static_cast<float>(y0);
+		const int wrappedX0 = ((x0 % m_textureWidth) + m_textureWidth) % m_textureWidth;
+		const int wrappedY0 = ((y0 % m_textureHeight) + m_textureHeight) % m_textureHeight;
+		const int wrappedX1 = (wrappedX0 + 1) % m_textureWidth;
+		const int wrappedY1 = (wrappedY0 + 1) % m_textureHeight;
+
+		const Color& c00 = m_texture[wrappedY0 * m_textureWidth + wrappedX0];
+		const Color& c10 = m_texture[wrappedY0 * m_textureWidth + wrappedX1];
+		const Color& c01 = m_texture[wrappedY1 * m_textureWidth + wrappedX0];
+		const Color& c11 = m_texture[wrappedY1 * m_textureWidth + wrappedX1];
+		const Color top = Color::lerp(c00, c10, fx);
+		const Color bottom = Color::lerp(c01, c11, fx);
+		return Color::lerp(top, bottom, fy);
 	}
 
 	Color FragmentShader::sampleTextureClamp(const Vector2& uv) {
@@ -216,5 +235,4 @@ namespace ST {
 		return Color(saturate(result), texColor.a);
 	}
 }
-
 
