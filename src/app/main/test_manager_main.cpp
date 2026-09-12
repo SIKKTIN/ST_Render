@@ -541,6 +541,17 @@ int main(int argc, char* argv[]) {
             ImGui_ImplSDL2_ProcessEvent(&event);
 
             if (event.type == SDL_QUIT) running = false;
+            if (event.type == SDL_WINDOWEVENT &&
+                (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
+                 event.window.event == SDL_WINDOWEVENT_RESIZED ||
+                 event.window.event == SDL_WINDOWEVENT_MAXIMIZED ||
+                 event.window.event == SDL_WINDOWEVENT_RESTORED)) {
+                // SDL/window backends can invalidate or clear render-target
+                // contents during a resize/maximize. The canvas has a fixed
+                // logical resolution, so simply rerender it for the new
+                // presentation surface instead of changing scene resolution.
+                if (auto* m = selectedLeaf()) m->needsRerender = true;
+            }
             if (event.type == SDL_KEYDOWN) {
                 deliverToLeaf([&](IModule* m) { m->onKeyDown(event.key.keysym.sym); });
                 if (event.key.keysym.sym == SDLK_ESCAPE) running = false;
