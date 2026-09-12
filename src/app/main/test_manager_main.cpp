@@ -77,7 +77,7 @@ int main(int argc, char* argv[]) {
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         Layout::WINDOW_W, Layout::WINDOW_H,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
+        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE
     );
     if (!window) {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << std::endl;
@@ -240,6 +240,7 @@ int main(int argc, char* argv[]) {
     // Track canvas screen bounds (set during ImGui render, used in event loop)
     int canvasMinX = 0, canvasMinY = 0;
     int canvasMaxX = 0, canvasMaxY = 0;
+    bool canvasMouseCaptured = false;
 
     SDL_Texture* canvas = SDL_CreateTexture(
         renderer,
@@ -349,6 +350,10 @@ int main(int argc, char* argv[]) {
             { "running", running },
             { "selectedModule", selectedLeaf() ? selectedLeaf()->getName() : "" },
             { "canvas", { { "width", renderSettings.width }, { "height", renderSettings.height } } },
+            { "canvasBounds", {
+                { "minX", canvasMinX }, { "minY", canvasMinY },
+                { "maxX", canvasMaxX }, { "maxY", canvasMaxY }
+            } },
             { "consoleOutput", consoleOutput },
             { "modules", modules }
         };
@@ -637,7 +642,9 @@ int main(int argc, char* argv[]) {
             // coordinates (Layout::CANVAS_W x CANVAS_H). Modules that don't
             // override fall through to onMouse* below and receive raw screen
             // coordinates instead.
-            if (inCanvas) {
+            const bool routeCanvasMotion = inCanvas || canvasMouseCaptured;
+            const bool routeCanvasButton = inCanvas || canvasMouseCaptured;
+            if (routeCanvasMotion || routeCanvasButton) {
                 int cx = 0, cy = 0;
                 if (event.type == SDL_MOUSEMOTION) {
                     cx = event.motion.x - canvasMinX;
@@ -658,8 +665,8 @@ int main(int argc, char* argv[]) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * renderSettings.width / screenW;
-                        cy = cy * renderSettings.height / screenH;
+                        cx = std::clamp(cx * renderSettings.width / screenW, 0, renderSettings.width - 1);
+                        cy = std::clamp(cy * renderSettings.height / screenH, 0, renderSettings.height - 1);
                     }
                     mod->onCanvasMouseMove(cx, cy);
                     canvasHandled = true;
@@ -667,19 +674,27 @@ int main(int argc, char* argv[]) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * renderSettings.width / screenW;
-                        cy = cy * renderSettings.height / screenH;
+                        cx = std::clamp(cx * renderSettings.width / screenW, 0, renderSettings.width - 1);
+                        cy = std::clamp(cy * renderSettings.height / screenH, 0, renderSettings.height - 1);
                     }
                     mod->onCanvasMouseDown(event.button.button, cx, cy);
+                    if (inCanvas && (event.button.button == SDL_BUTTON_LEFT ||
+                                     event.button.button == SDL_BUTTON_RIGHT)) {
+                        canvasMouseCaptured = true;
+                    }
                     canvasHandled = true;
                 } else if (event.type == SDL_MOUSEBUTTONUP) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * renderSettings.width / screenW;
-                        cy = cy * renderSettings.height / screenH;
+                        cx = std::clamp(cx * renderSettings.width / screenW, 0, renderSettings.width - 1);
+                        cy = std::clamp(cy * renderSettings.height / screenH, 0, renderSettings.height - 1);
                     }
                     mod->onCanvasMouseUp(event.button.button, cx, cy);
+                    if (event.button.button == SDL_BUTTON_LEFT ||
+                        event.button.button == SDL_BUTTON_RIGHT) {
+                        canvasMouseCaptured = false;
+                    }
                     canvasHandled = true;
                 }
             }
@@ -975,15 +990,17 @@ int main(int argc, char* argv[]) {
                 ImGui::Dummy(ImVec2(0.0f, padY));
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + padX);
                 ImGui::Image((void*)(intptr_t)canvas, ImVec2(imageW, imageH));
-                ImGui::Dummy(ImVec2(0.0f, padY));
 
                 // Record canvas screen bounds for event routing
+                // immediately after Image: a following Dummy would replace
+                // ImGui's last-item rectangle with a zero-width spacer.
                 ImVec2 cMin = ImGui::GetItemRectMin();
                 ImVec2 cMax = ImGui::GetItemRectMax();
                 canvasMinX = (int)cMin.x;
                 canvasMinY = (int)cMin.y;
                 canvasMaxX = (int)cMax.x;
                 canvasMaxY = (int)cMax.y;
+                ImGui::Dummy(ImVec2(0.0f, padY));
                 if (auto* m = selectedLeaf()) {
                     m->renderUIOverlay(
                         canvasMinX, canvasMinY, (int)imageW, (int)imageH);
