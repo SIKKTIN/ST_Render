@@ -114,6 +114,13 @@ private:
                             const ST::Matrix4x4& view,
                             const ST::Matrix4x4& projection,
                             const ST::Matrix4x4& model);
+    void drawSelectionOutline(SDL_Renderer* renderer,
+                              int canvasW, int canvasH,
+                              const ST::Matrix4x4& view,
+                              const ST::Matrix4x4& projection,
+                              const ST::Matrix4x4& model);
+    int pickSceneObject(int canvasX, int canvasY) const;
+    void focusSelectedSceneObject();
     void syncLightAnglesFromDirection();
     void updateLightDirectionFromAngles();
 
@@ -199,6 +206,8 @@ private:
 
     int m_canvasW;
     int m_canvasH;
+    int m_inputCanvasW = 640;
+    int m_inputCanvasH = 480;
     // Reused per-draw vertex transform cache. Indexed meshes otherwise
     // transform the same vertex once for every triangle that references it.
     std::vector<ST::VertexOut> m_vertexCache;

@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -424,6 +425,79 @@ ST::Matrix4x4 TestModule_3DRender::buildSceneObjectMatrix(int objectIndex) const
            normalize;
 }
 
+int TestModule_3DRender::pickSceneObject(int canvasX, int canvasY) const {
+    if (m_sceneObjects.empty()) return -1;
+
+    const float width = static_cast<float>(std::max(1, m_inputCanvasW));
+    const float height = static_cast<float>(std::max(1, m_inputCanvasH));
+    const float aspect = width / height;
+    const float tanHalfFov = std::tan(static_cast<float>(M_PI) / 6.0f);
+    const float ndcX = (2.0f * (static_cast<float>(canvasX) + 0.5f) / width - 1.0f) *
+                       aspect * tanHalfFov;
+    const float ndcY = (1.0f - 2.0f * (static_cast<float>(canvasY) + 0.5f) / height) *
+                       tanHalfFov;
+
+    const float cp = std::cos(m_pitch);
+    const float sp = std::sin(m_pitch);
+    const float cy = std::cos(m_yaw);
+    const float sy = std::sin(m_yaw);
+    const ST::Vector3 forward(-cp * sy, -sp, -cp * cy);
+    const ST::Vector3 right = forward.cross(ST::Vector3::up()).normalized();
+    const ST::Vector3 cameraUp = right.cross(forward).normalized();
+    const ST::Vector3 rayOrigin = m_eye;
+    const ST::Vector3 rayDirection =
+        (forward + right * ndcX + cameraUp * ndcY).normalized();
+
+    int picked = -1;
+    float nearest = std::numeric_limits<float>::max();
+    for (int index = 0; index < static_cast<int>(m_sceneObjects.size()); ++index) {
+        const SceneObject& object = m_sceneObjects[index];
+        if (!object.visible || !object.model) continue;
+        const ST::Matrix4x4 objectMatrix = buildSceneObjectMatrix(index);
+        const ST::Vector3 center =
+            (objectMatrix * ST::Vector4(object.model->boundsCenter, 1.0f)).toVector3();
+        const float maxScale = std::max({std::fabs(object.scale.x),
+                                         std::fabs(object.scale.y),
+                                         std::fabs(object.scale.z)});
+        const float radius = std::max(0.05f, 0.9f * maxScale);
+        const ST::Vector3 offset = rayOrigin - center;
+        const float b = offset.dot(rayDirection);
+        const float c = offset.lengthSquared() - radius * radius;
+        const float discriminant = b * b - c;
+        if (discriminant < 0.0f) continue;
+        const float root = std::sqrt(discriminant);
+        float distance = -b - root;
+        if (distance < 0.0f) distance = -b + root;
+        if (distance >= 0.0f && distance < nearest) {
+            nearest = distance;
+            picked = index;
+        }
+    }
+    return picked;
+}
+
+void TestModule_3DRender::focusSelectedSceneObject() {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
+    const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+    if (!object.model || !object.visible) return;
+    const ST::Matrix4x4 objectMatrix = buildSceneObjectMatrix(m_selectedSceneObject);
+    const ST::Vector3 center =
+        (objectMatrix * ST::Vector4(object.model->boundsCenter, 1.0f)).toVector3();
+    const float maxScale = std::max({std::fabs(object.scale.x),
+                                     std::fabs(object.scale.y),
+                                     std::fabs(object.scale.z)});
+    const float radius = std::max(0.05f, 0.9f * maxScale);
+    const float distance = std::max(1.5f, radius * 2.4f);
+    const float cp = std::cos(m_pitch);
+    const float sp = std::sin(m_pitch);
+    const float cy = std::cos(m_yaw);
+    const float sy = std::sin(m_yaw);
+    const ST::Vector3 forward(-cp * sy, -sp, -cp * cy);
+    m_eye = center - forward * distance;
+    needsRerender = true;
+}
+
 void TestModule_3DRender::bindSceneObjectMaterial(int objectIndex) {
     if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return;
     const SceneObject& object = m_sceneObjects[objectIndex];
@@ -592,6 +666,8 @@ void TestModule_3DRender::update(float deltaTime) {
 
 void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) {
     if (canvasW == 0 || canvasH == 0) return;
+    m_inputCanvasW = canvasW;
+    m_inputCanvasH = canvasH;
 
     // Dense meshes are fill-rate bound in the software rasterizer. During a
     // camera drag, render a half-resolution preview and let SDL upscale it;
@@ -701,6 +777,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
 
     SDL_UpdateTexture(m_outputTexture, nullptr, m_rgba32Buffer.data(), renderW * sizeof(uint32_t));
     SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
+    drawSelectionOutline(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawTransformGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawLightGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
 }
@@ -889,6 +966,53 @@ void TestModule_3DRender::updateLightDirectionFromAngles() {
         std::sin(m_lightPitch),
         cp * std::cos(m_lightYaw));
     m_light.direction = -sourceDirection;
+}
+
+void TestModule_3DRender::drawSelectionOutline(SDL_Renderer* renderer,
+                                               int canvasW, int canvasH,
+                                               const ST::Matrix4x4& view,
+                                               const ST::Matrix4x4& projection,
+                                               const ST::Matrix4x4& model) {
+    if (!renderer || m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
+    const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+    if (!object.visible || !object.model) return;
+
+    auto project = [&](const ST::Vector3& world, int& x, int& y) {
+        const ST::Vector4 clip = projection * view * ST::Vector4(world, 1.0f);
+        if (!std::isfinite(clip.w) || clip.w <= 1e-6f) return false;
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        if (!std::isfinite(ndcX) || !std::isfinite(ndcY)) return false;
+        x = static_cast<int>((ndcX + 1.0f) * 0.5f * canvasW);
+        y = static_cast<int>((1.0f - ndcY) * 0.5f * canvasH);
+        return true;
+    };
+
+    const ST::Vector3& min = object.model->boundsMin;
+    const ST::Vector3& max = object.model->boundsMax;
+    const ST::Vector3 corners[8] = {
+        {min.x, min.y, min.z}, {max.x, min.y, min.z},
+        {max.x, max.y, min.z}, {min.x, max.y, min.z},
+        {min.x, min.y, max.z}, {max.x, min.y, max.z},
+        {max.x, max.y, max.z}, {min.x, max.y, max.z}
+    };
+    int screen[8][2]{};
+    for (int i = 0; i < 8; ++i) {
+        if (!project((model * ST::Vector4(corners[i], 1.0f)).toVector3(),
+                     screen[i][0], screen[i][1])) return;
+    }
+    static constexpr int edges[12][2] = {
+        {0,1}, {1,2}, {2,3}, {3,0},
+        {4,5}, {5,6}, {6,7}, {7,4},
+        {0,4}, {1,5}, {2,6}, {3,7}
+    };
+    SDL_SetRenderDrawColor(renderer, 255, 215, 70, 255);
+    for (const auto& edge : edges) {
+        SDL_RenderDrawLine(renderer,
+                           screen[edge[0]][0], screen[edge[0]][1],
+                           screen[edge[1]][0], screen[edge[1]][1]);
+    }
 }
 
 void TestModule_3DRender::drawTransformGizmo(SDL_Renderer* renderer,
@@ -1253,6 +1377,17 @@ void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY
             return;
         }
     }
+    if (button == SDL_BUTTON_LEFT) {
+        const int pickedObject = pickSceneObject(canvasX, canvasY);
+        if (pickedObject >= 0) {
+            selectSceneObject(pickedObject);
+        } else {
+            // Clicking empty canvas clears the hierarchy selection, while the
+            // same press still starts normal camera orbiting below.
+            selectSceneObject(-1);
+        }
+        needsRerender = true;
+    }
     onMouseDown(button, canvasX, canvasY);
 }
 void TestModule_3DRender::onCanvasMouseUp(int button, int canvasX, int canvasY) {
@@ -1321,4 +1456,5 @@ void TestModule_3DRender::onKeyDown(int keycode) {
     if (keycode == SDLK_w) m_transformTool = TransformTool::Translate;
     if (keycode == SDLK_e) m_transformTool = TransformTool::Rotate;
     if (keycode == SDLK_r) m_transformTool = TransformTool::Scale;
+    if (keycode == SDLK_f) focusSelectedSceneObject();
 }
