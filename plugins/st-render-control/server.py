@@ -182,6 +182,20 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "list_models",
+        "title": "List 3D Render models",
+        "description": "List OBJ model assets available to the 3D Render module.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "select_model",
+        "title": "Select a 3D Render model",
+        "description": "Select a repository OBJ model by catalog index and rerender 3D Render.",
+        "inputSchema": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0}}, "required": ["index"], "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "get_console_output",
         "title": "Read ST Render console output",
         "description": "Read the console text produced by the currently selected module.",
@@ -289,6 +303,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "select_shader":
         result = _send_app_command("select_shader", arguments)
         return _text_result(f"Selected shader index {result.get('selectedShader', '')}.", result)
+    if name == "list_models":
+        result = _send_app_command("list_models")
+        return _text_result(f"Found {len(result.get('models', []))} models.", result)
+    if name == "select_model":
+        result = _send_app_command("select_model", arguments)
+        return _text_result(f"Selected model index {result.get('selectedModel', '')}.", result)
     if name == "get_console_output":
         result = _send_app_command("get_console_output")
         output = str(result.get("output", ""))

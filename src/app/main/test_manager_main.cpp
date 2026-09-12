@@ -382,6 +382,46 @@ int main(int argc, char* argv[]) {
             };
         }
 
+        if (command == "list_models" || command == "select_model") {
+            auto* selected = selectedLeaf();
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selected);
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+
+            if (command == "select_model") {
+                int modelIndex = -1;
+                if (params.contains("index") && params["index"].is_number_integer()) {
+                    modelIndex = params["index"].get<int>();
+                }
+                if (modelIndex < 0 || !render3D->selectModelIndex(modelIndex)) {
+                    throw std::runtime_error(render3D->getModelError().empty()
+                        ? "Model index was not found or failed to load"
+                        : render3D->getModelError());
+                }
+                runModule(selectedModule);
+            }
+
+            ST::AppControlBridge::Json models = ST::AppControlBridge::Json::array();
+            const auto& entries = render3D->getModelEntries();
+            for (size_t i = 0; i < entries.size(); ++i) {
+                models.push_back({
+                    { "index", static_cast<int>(i) },
+                    { "name", entries[i].displayName },
+                    { "path", entries[i].relativePath },
+                    { "selected", static_cast<int>(i) == render3D->getSelectedModelIndex() }
+                });
+            }
+            const auto* model = render3D->getActiveModel();
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "selectedModel", render3D->getSelectedModelIndex() },
+                { "error", render3D->getModelError() },
+                { "vertexCount", model ? model->getVertexCount() : 8 },
+                { "triangleCount", model ? model->getTriangleCount() : 12 },
+                { "partCount", model ? static_cast<int>(model->parts.size()) : 1 },
+                { "models", models }
+            };
+        }
+
         if (command == "select_module") {
             int match = -1;
             if (params.contains("index") && params["index"].is_number_integer()) {

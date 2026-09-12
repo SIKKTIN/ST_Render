@@ -1,0 +1,6 @@
+test_cube.obj downloaded from https://github.com/mattdesl/load-asset/blob/master/test/fixtures/cube.obj
+Source repository: https://github.com/mattdesl/load-asset
+Used as a small OBJ importer smoke-test asset.
+sphere.obj source: https://github.com/melfm/openGL-shading-texture/blob/master/Models/sphere.obj
+teapot.obj source: https://github.com/jaz303/utah-teapot/blob/master/teapot.obj
+suzanne.obj source: https://github.com/alecjacobson/common-3d-test-models/blob/master/data/suzanne.obj

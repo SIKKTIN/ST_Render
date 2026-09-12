@@ -19,7 +19,7 @@ add_executable(ST_Render_Manager
 )
 
 target_link_libraries(ST_Render_Manager PRIVATE
-    Math Buffer Geometry Transform Camera Pipeline Renderer Editor DataBase
+    Math Buffer Geometry Asset Transform Camera Pipeline Renderer Editor DataBase
     nlohmann_json::nlohmann_json
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
@@ -75,6 +75,14 @@ if(WIN32)
             "${CMAKE_SOURCE_DIR}/Data/Shaders"
             $<TARGET_FILE_DIR:ST_Render_Manager>/Data/Shaders
         COMMENT "Copying shader scripts"
+        VERBATIM
+    )
+
+    add_custom_command(TARGET ST_Render_Manager POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/Data/Models"
+            $<TARGET_FILE_DIR:ST_Render_Manager>/Data/Models
+        COMMENT "Copying model assets"
         VERBATIM
     )
 endif()

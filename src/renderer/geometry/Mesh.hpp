@@ -14,6 +14,7 @@ namespace ST {
         void addTriangle(int i0, int i1, int i2);
 
         const std::vector<Vertex>& getVertices() const { return m_vertices; }
+        std::vector<Vertex>& getVertices() { return m_vertices; }
         const std::vector<int>& getIndices() const { return m_indices; }
 
         int getVertexCount() const { return static_cast<int>(m_vertices.size()); }

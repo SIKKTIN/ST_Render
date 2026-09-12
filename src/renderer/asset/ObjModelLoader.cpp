@@ -1,0 +1,207 @@
+#include "renderer/asset/ObjModelLoader.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <unordered_map>
+
+namespace ST {
+namespace {
+
+struct ObjIndex {
+    int position = 0;
+    int texCoord = 0;
+    int normal = 0;
+
+    bool operator==(const ObjIndex& other) const {
+        return position == other.position && texCoord == other.texCoord && normal == other.normal;
+    }
+};
+
+struct ObjIndexHash {
+    size_t operator()(const ObjIndex& value) const {
+        size_t h = static_cast<size_t>(value.position);
+        h = h * 16777619u ^ static_cast<size_t>(value.texCoord);
+        h = h * 16777619u ^ static_cast<size_t>(value.normal);
+        return h;
+    }
+};
+
+int resolveIndex(int index, int count) {
+    if (index > 0) return index - 1;
+    if (index < 0) return count + index;
+    return -1;
+}
+
+bool parseFaceIndex(const std::string& token, ObjIndex& result) {
+    result = {};
+    std::stringstream stream(token);
+    std::string component;
+    if (!std::getline(stream, component, '/') || component.empty()) return false;
+    try {
+        result.position = std::stoi(component);
+        if (std::getline(stream, component, '/') && !component.empty()) {
+            result.texCoord = std::stoi(component);
+        }
+        if (std::getline(stream, component, '/') && !component.empty()) {
+            result.normal = std::stoi(component);
+        }
+    } catch (...) {
+        return false;
+    }
+    return result.position != 0;
+}
+
+} // namespace
+
+bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::string& error) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        error = "unable to open OBJ file: " + path;
+        return false;
+    }
+
+    std::vector<Vector3> positions;
+    std::vector<Vector2> texCoords;
+    std::vector<Vector3> normals;
+    ModelPart part;
+    part.name = "default";
+    std::unordered_map<ObjIndex, int, ObjIndexHash> vertexMap;
+    std::vector<bool> hasNormal;
+    std::vector<Vector3> accumulatedNormals;
+    std::string line;
+    int lineNumber = 0;
+
+    auto makeVertex = [&](const ObjIndex& source, int& outputIndex) -> bool {
+        const int positionIndex = resolveIndex(source.position, static_cast<int>(positions.size()));
+        const int texCoordIndex = resolveIndex(source.texCoord, static_cast<int>(texCoords.size()));
+        const int normalIndex = resolveIndex(source.normal, static_cast<int>(normals.size()));
+        if (positionIndex < 0 || positionIndex >= static_cast<int>(positions.size())) return false;
+        if (source.texCoord != 0 && (texCoordIndex < 0 || texCoordIndex >= static_cast<int>(texCoords.size()))) return false;
+        if (source.normal != 0 && (normalIndex < 0 || normalIndex >= static_cast<int>(normals.size()))) return false;
+
+        auto existing = vertexMap.find(source);
+        if (existing != vertexMap.end()) {
+            outputIndex = existing->second;
+            return true;
+        }
+
+        Vertex vertex;
+        vertex.position = positions[positionIndex];
+        vertex.texCoord = source.texCoord == 0 ? Vector2::zero() : texCoords[texCoordIndex];
+        vertex.normal = source.normal == 0 ? Vector3::zero() : normals[normalIndex];
+        vertex.color = Color::white();
+        outputIndex = part.mesh.getVertexCount();
+        part.mesh.addVertex(vertex);
+        vertexMap.emplace(source, outputIndex);
+        hasNormal.push_back(source.normal != 0);
+        accumulatedNormals.emplace_back(Vector3::zero());
+        return true;
+    };
+
+    while (std::getline(file, line)) {
+        ++lineNumber;
+        std::stringstream stream(line);
+        std::string tag;
+        stream >> tag;
+        if (tag.empty() || tag[0] == '#') continue;
+
+        if (tag == "v") {
+            Vector3 value;
+            if (!(stream >> value.x >> value.y >> value.z)) {
+                error = "invalid vertex at line " + std::to_string(lineNumber);
+                return false;
+            }
+            positions.push_back(value);
+        } else if (tag == "vt") {
+            Vector2 value;
+            if (!(stream >> value.x >> value.y)) {
+                error = "invalid texture coordinate at line " + std::to_string(lineNumber);
+                return false;
+            }
+            texCoords.push_back(value);
+        } else if (tag == "vn") {
+            Vector3 value;
+            if (!(stream >> value.x >> value.y >> value.z)) {
+                error = "invalid normal at line " + std::to_string(lineNumber);
+                return false;
+            }
+            normals.push_back(value.normalized());
+        } else if (tag == "o" || tag == "g") {
+            std::string name;
+            stream >> name;
+            if (!name.empty()) part.name = name;
+        } else if (tag == "usemtl") {
+            stream >> part.materialName;
+        } else if (tag == "f") {
+            std::vector<ObjIndex> face;
+            std::string token;
+            while (stream >> token) {
+                ObjIndex index;
+                if (!parseFaceIndex(token, index)) {
+                    error = "invalid face index at line " + std::to_string(lineNumber);
+                    return false;
+                }
+                face.push_back(index);
+            }
+            if (face.size() < 3) {
+                error = "face has fewer than three vertices at line " + std::to_string(lineNumber);
+                return false;
+            }
+
+            int first = -1;
+            for (size_t i = 1; i + 1 < face.size(); ++i) {
+                int i0 = -1, i1 = -1, i2 = -1;
+                if (!makeVertex(face[0], i0) || !makeVertex(face[i], i1) || !makeVertex(face[i + 1], i2)) {
+                    error = "face references an invalid vertex at line " + std::to_string(lineNumber);
+                    return false;
+                }
+                if (first < 0) first = i0;
+                part.mesh.addTriangle(i0, i1, i2);
+
+                const auto& vertices = part.mesh.getVertices();
+                Vector3 faceNormal = (vertices[i1].position - vertices[i0].position)
+                    .cross(vertices[i2].position - vertices[i0].position).normalized();
+                if (!hasNormal[i0]) accumulatedNormals[i0] += faceNormal;
+                if (!hasNormal[i1]) accumulatedNormals[i1] += faceNormal;
+                if (!hasNormal[i2]) accumulatedNormals[i2] += faceNormal;
+            }
+        }
+    }
+
+    if (part.mesh.getTriangleCount() == 0) {
+        error = "OBJ file contains no triangles: " + path;
+        return false;
+    }
+
+    std::vector<Vertex>& vertices = part.mesh.getVertices();
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        if (!hasNormal[i]) vertices[i].normal = accumulatedNormals[i].normalized();
+        if (vertices[i].normal.lengthSquared() < 1e-8f) vertices[i].normal = Vector3::forward();
+    }
+
+    Vector3 minValue(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max());
+    Vector3 maxValue(std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest());
+    for (const Vertex& vertex : vertices) {
+        minValue.x = std::min(minValue.x, vertex.position.x);
+        minValue.y = std::min(minValue.y, vertex.position.y);
+        minValue.z = std::min(minValue.z, vertex.position.z);
+        maxValue.x = std::max(maxValue.x, vertex.position.x);
+        maxValue.y = std::max(maxValue.y, vertex.position.y);
+        maxValue.z = std::max(maxValue.z, vertex.position.z);
+    }
+
+    asset = {};
+    asset.sourcePath = path;
+    asset.parts.push_back(std::move(part));
+    asset.boundsMin = minValue;
+    asset.boundsMax = maxValue;
+    asset.boundsCenter = (minValue + maxValue) * 0.5f;
+    asset.boundsRadius = (maxValue - asset.boundsCenter).length();
+    error.clear();
+    return true;
+}
+
+} // namespace ST

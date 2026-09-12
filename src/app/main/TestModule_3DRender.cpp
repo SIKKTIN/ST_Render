@@ -48,6 +48,7 @@ TestModule_3DRender::TestModule_3DRender()
     m_activeShader = m_builtinShader;
     scanShaderCatalog();
     if (m_selectedShaderIndex >= 0) loadSelectedShader();
+    scanModelCatalog();
 }
 
 TestModule_3DRender::~TestModule_3DRender() {
@@ -139,6 +140,60 @@ void TestModule_3DRender::pollShaderReload() {
     }
 }
 
+void TestModule_3DRender::scanModelCatalog() {
+    const std::string previousPath =
+        (m_selectedModelIndex >= 0 &&
+         m_selectedModelIndex < static_cast<int>(m_modelCatalog.getEntries().size()))
+            ? m_modelCatalog.getEntries()[m_selectedModelIndex].relativePath
+            : std::string();
+
+    std::string error;
+    if (!m_modelCatalog.scan(m_modelRoot, error)) {
+        const std::string fallback = "../../Data/Models";
+        if (!m_modelCatalog.scan(fallback, error)) {
+            m_selectedModelIndex = -1;
+            m_modelLoaded = false;
+            m_modelError = error;
+            return;
+        }
+        m_modelRoot = fallback;
+    }
+
+    m_selectedModelIndex = m_modelCatalog.findByRelativePath(previousPath);
+    if (m_selectedModelIndex < 0 && !m_modelCatalog.getEntries().empty()) {
+        m_selectedModelIndex = 0;
+    }
+    m_modelError.clear();
+    if (m_selectedModelIndex >= 0) loadSelectedModel();
+}
+
+bool TestModule_3DRender::loadSelectedModel() {
+    const auto& entries = m_modelCatalog.getEntries();
+    if (m_selectedModelIndex < 0 || m_selectedModelIndex >= static_cast<int>(entries.size())) {
+        m_modelLoaded = false;
+        m_modelError.clear();
+        return true;
+    }
+
+    ST::ModelAsset loaded;
+    std::string error;
+    if (!ST::ObjModelLoader::load(entries[m_selectedModelIndex].absolutePath, loaded, error)) {
+        m_modelError = error;
+        return false;
+    }
+    m_activeModel = std::move(loaded);
+    m_modelLoaded = true;
+    m_modelError.clear();
+    needsRerender = true;
+    return true;
+}
+
+bool TestModule_3DRender::selectModelIndex(int index) {
+    if (index < 0 || index >= static_cast<int>(m_modelCatalog.getEntries().size())) return false;
+    m_selectedModelIndex = index;
+    return loadSelectedModel();
+}
+
 void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
                                    const ST::Matrix4x4& model,
                                    const ST::Matrix4x4& view,
@@ -162,6 +217,14 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     const auto& verts = mesh.getVertices();
     const auto& idx = mesh.getIndices();
 
+    // Transform each indexed vertex once per draw. The teapot has 3,644
+    // vertices but 6,320 triangles; without this cache the vertex shader was
+    // invoked up to 18,960 times for one frame instead of 3,644 times.
+    m_vertexCache.resize(verts.size());
+    for (size_t vertexIndex = 0; vertexIndex < verts.size(); ++vertexIndex) {
+        m_vertexCache[vertexIndex] = shader->vertex(verts[vertexIndex], shaderContext);
+    }
+
     // Compute the mesh's world-space bounding sphere once per drawMesh call.
     // We use it to detect "camera inside mesh" and to flip the back-face
     // culling direction so that stepping inside a closed convex mesh still
@@ -179,9 +242,9 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     bool cameraInside = cameraToCenter.length() < boundingRadius;
 
     for (int i = 0; i + 2 < (int)idx.size(); i += 3) {
-        ST::VertexOut v0 = shader->vertex(verts[idx[i + 0]], shaderContext);
-        ST::VertexOut v1 = shader->vertex(verts[idx[i + 1]], shaderContext);
-        ST::VertexOut v2 = shader->vertex(verts[idx[i + 2]], shaderContext);
+        ST::VertexOut v0 = m_vertexCache[idx[i + 0]];
+        ST::VertexOut v1 = m_vertexCache[idx[i + 1]];
+        ST::VertexOut v2 = m_vertexCache[idx[i + 2]];
 
         // ---- Back-face culling, inside-aware ----
         // The outward face normal is (v1 - v0) x (v2 - v0) in world space.
@@ -280,10 +343,16 @@ void TestModule_3DRender::update(float deltaTime) {
 void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) {
     if (canvasW == 0 || canvasH == 0) return;
 
-    if (m_frameBuffer == nullptr || m_canvasW != canvasW || m_canvasH != canvasH) {
-        rebuildBuffers(canvasW, canvasH);
-        m_canvasW = canvasW;
-        m_canvasH = canvasH;
+    // Dense meshes are fill-rate bound in the software rasterizer. During a
+    // camera drag, render a half-resolution preview and let SDL upscale it;
+    // mouse release schedules a sharp full-resolution frame.
+    const int renderW = m_interactionActive ? std::max(1, canvasW / 2) : canvasW;
+    const int renderH = m_interactionActive ? std::max(1, canvasH / 2) : canvasH;
+
+    if (m_frameBuffer == nullptr || m_canvasW != renderW || m_canvasH != renderH) {
+        rebuildBuffers(renderW, renderH);
+        m_canvasW = renderW;
+        m_canvasH = renderH;
     }
 
     m_frameBuffer->clear(ST::Color(0.08f, 0.09f, 0.12f, 1.0f));
@@ -307,7 +376,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     ST::Vector3 up(0.0f, 1.0f, 0.0f);
     ST::Matrix4x4 view = ST::Matrix4x4::lookAt(eye, target, up);
 
-    float aspect = static_cast<float>(canvasW) / static_cast<float>(canvasH);
+    float aspect = static_cast<float>(renderW) / static_cast<float>(renderH);
     // The demo deliberately supports flying inside the unit cube.  A 0.1
     // near plane would clip away a wall as soon as the camera gets within
     // ten centimetres of it, so use a smaller near distance for the editor
@@ -320,6 +389,13 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     );
 
     ST::Matrix4x4 model = ST::Matrix4x4::identity();
+    if (m_modelLoaded) {
+        const float radius = std::max(0.001f, m_activeModel.boundsRadius);
+        // Center and normalize imported assets so arbitrary source units fit
+        // the existing editor camera without requiring per-model settings.
+        model = ST::Matrix4x4::scale(0.9f / radius) *
+                ST::Matrix4x4::translation(-m_activeModel.boundsCenter);
+    }
 
     m_fragmentShader.setViewPosition(eye);
     m_fragmentShader.setMaterial(m_material);
@@ -330,34 +406,43 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     pollShaderReload();
 
     m_rasterizer.setUseRawScreenCoords(false);
-    drawMesh(m_cube, model, view, projection);
+    if (m_modelLoaded) {
+        for (const auto& part : m_activeModel.parts) {
+            drawMesh(part.mesh, model, view, projection);
+        }
+    } else {
+        drawMesh(m_cube, model, view, projection);
+    }
 
     // ---- Upload to SDL texture ----
     SDL_Renderer* renderer = static_cast<SDL_Renderer*>(canvasTexture);
     const auto& pixels = m_frameBuffer->getPixels();
 
-    std::vector<uint32_t> rgba32(canvasW * canvasH);
-    for (int i = 0; i < canvasW * canvasH; ++i) {
-        rgba32[i] = packRGBA(pixels[i]);
+    // Keep the upload staging buffer alive between frames. Camera drags can
+    // trigger many renders per second, and repeatedly allocating a 640x480
+    // pixel array adds avoidable allocator and cache churn.
+    m_rgba32Buffer.resize(static_cast<size_t>(renderW) * static_cast<size_t>(renderH));
+    for (int i = 0; i < renderW * renderH; ++i) {
+        m_rgba32Buffer[static_cast<size_t>(i)] = packRGBA(pixels[i]);
     }
 
     // Reuse one streaming texture instead of allocating and destroying an SDL
     // texture every frame. The old per-frame allocation caused unnecessary
     // driver/heap churn and could eventually surface as heap corruption.
     if (m_sdlRenderer != renderer || !m_outputTexture ||
-        m_outputTextureW != canvasW || m_outputTextureH != canvasH) {
+        m_outputTextureW != renderW || m_outputTextureH != renderH) {
         if (m_outputTexture) SDL_DestroyTexture(m_outputTexture);
         m_sdlRenderer = renderer;
         m_outputTexture = SDL_CreateTexture(renderer,
             SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_STREAMING,
-            canvasW, canvasH);
-        m_outputTextureW = canvasW;
-        m_outputTextureH = canvasH;
+            renderW, renderH);
+        m_outputTextureW = renderW;
+        m_outputTextureH = renderH;
     }
     if (!m_outputTexture) return;
 
-    SDL_UpdateTexture(m_outputTexture, nullptr, rgba32.data(), canvasW * sizeof(uint32_t));
+    SDL_UpdateTexture(m_outputTexture, nullptr, m_rgba32Buffer.data(), renderW * sizeof(uint32_t));
     SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
 }
 
@@ -403,7 +488,64 @@ bool TestModule_3DRender::renderControls() {
     changed |= ImGui::ColorEdit3("Ambient", &m_ambientLight.x);
 
     changed |= renderShaderControls();
+    changed |= renderModelControls();
     if (changed) needsRerender = true;
+    return changed;
+}
+
+bool TestModule_3DRender::renderModelControls() {
+    bool changed = false;
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Model");
+    ImGui::Separator();
+
+    const auto& entries = m_modelCatalog.getEntries();
+    if (entries.empty()) {
+        ImGui::TextDisabled("No .obj files found in %s", m_modelRoot.c_str());
+    } else {
+        const char* preview = (m_selectedModelIndex >= 0 &&
+                               m_selectedModelIndex < static_cast<int>(entries.size()))
+            ? entries[m_selectedModelIndex].displayName.c_str()
+            : "Built-in cube";
+        if (ImGui::BeginCombo("Current model", preview)) {
+            for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
+                const bool selected = i == m_selectedModelIndex;
+                if (ImGui::Selectable(entries[i].displayName.c_str(), selected)) {
+                    m_selectedModelIndex = i;
+                    loadSelectedModel();
+                    changed = true;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entries[i].relativePath.c_str());
+            }
+            ImGui::EndCombo();
+        }
+        if (m_selectedModelIndex >= 0 && m_selectedModelIndex < static_cast<int>(entries.size())) {
+            ImGui::TextDisabled("%s", entries[m_selectedModelIndex].relativePath.c_str());
+        }
+    }
+
+    if (ImGui::Button("Refresh model list")) {
+        scanModelCatalog();
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload current model")) {
+        loadSelectedModel();
+        changed = true;
+    }
+
+    if (m_modelLoaded) {
+        ImGui::Text("Parts: %d  Vertices: %d  Triangles: %d",
+                    static_cast<int>(m_activeModel.parts.size()),
+                    m_activeModel.getVertexCount(), m_activeModel.getTriangleCount());
+    } else {
+        ImGui::TextDisabled("Active: built-in cube");
+    }
+    if (!m_modelError.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Model error");
+        ImGui::TextWrapped("%s", m_modelError.c_str());
+    }
     return changed;
 }
 
@@ -479,6 +621,10 @@ void TestModule_3DRender::onMouseDown(int button, int x, int y) {
         m_lastCanvasX = x;
         m_lastCanvasY = y;
     }
+    if (button == SDL_BUTTON_LEFT || button == SDL_BUTTON_RIGHT) {
+        m_interactionActive = true;
+        needsRerender = true;
+    }
 }
 
 void TestModule_3DRender::onMouseUp(int button) {
@@ -487,11 +633,16 @@ void TestModule_3DRender::onMouseUp(int button) {
     } else if (button == SDL_BUTTON_RIGHT) {
         m_rmbDown = false;
     }
+    if (!m_lmbDown && !m_rmbDown) {
+        m_interactionActive = false;
+        needsRerender = true;
+    }
 }
 
 void TestModule_3DRender::onMouseMove(int x, int y) {
     // Both LMB and RMB dragging rotate the view -- matches UE.
     if (!m_lmbDown && !m_rmbDown) return;
+    m_interactionActive = true;
     int dx = x - m_lastCanvasX;
     int dy = y - m_lastCanvasY;
     m_lastCanvasX = x;

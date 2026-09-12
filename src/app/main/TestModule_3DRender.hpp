@@ -9,6 +9,9 @@
 #include "renderer/shader/ShaderCatalog.hpp"
 #include "renderer/shader/ShaderManager.hpp"
 #include "renderer/shader/ShaderProgram.hpp"
+#include "renderer/asset/ModelAsset.hpp"
+#include "renderer/asset/ModelCatalog.hpp"
+#include "renderer/asset/ObjModelLoader.hpp"
 #include "renderer/geometry/Vertex.hpp"
 #include "renderer/geometry/Mesh.hpp"
 #include "core/math/Matrix4x4.hpp"
@@ -37,6 +40,11 @@ public:
     int getSelectedShaderIndex() const { return m_selectedShaderIndex; }
     const std::string& getShaderError() const { return m_shaderError; }
     bool selectShaderIndex(int index);
+    const std::vector<ST::ModelEntry>& getModelEntries() const { return m_modelCatalog.getEntries(); }
+    int getSelectedModelIndex() const { return m_selectedModelIndex; }
+    const std::string& getModelError() const { return m_modelError; }
+    bool selectModelIndex(int index);
+    const ST::ModelAsset* getActiveModel() const { return m_modelLoaded ? &m_activeModel : nullptr; }
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
@@ -56,6 +64,9 @@ private:
     void loadSelectedShader();
     void pollShaderReload();
     bool renderShaderControls();
+    void scanModelCatalog();
+    bool loadSelectedModel();
+    bool renderModelControls();
 
     ST::FrameBuffer* m_frameBuffer;
     ST::DepthBuffer* m_depthBuffer;
@@ -68,6 +79,12 @@ private:
     bool m_lightingEnabled;
 
     ST::Mesh m_cube;
+    ST::ModelAsset m_activeModel;
+    bool m_modelLoaded = false;
+    ST::ModelCatalog m_modelCatalog;
+    int m_selectedModelIndex = -1;
+    std::string m_modelError;
+    std::string m_modelRoot = "Data/Models";
     ST::ShaderCatalog m_shaderCatalog;
     ST::ShaderManager m_shaderManager;
     std::shared_ptr<ST::IShaderProgram> m_builtinShader;
@@ -90,11 +107,16 @@ private:
     float m_moveSpeedMax;
     bool  m_lmbDown;
     bool  m_rmbDown;
+    bool m_interactionActive = false;
     int   m_lastCanvasX;
     int   m_lastCanvasY;
 
     int m_canvasW;
     int m_canvasH;
+    // Reused per-draw vertex transform cache. Indexed meshes otherwise
+    // transform the same vertex once for every triangle that references it.
+    std::vector<ST::VertexOut> m_vertexCache;
+    std::vector<uint32_t> m_rgba32Buffer;
     SDL_Renderer* m_sdlRenderer = nullptr;
     SDL_Texture* m_outputTexture = nullptr;
     int m_outputTextureW = 0;
