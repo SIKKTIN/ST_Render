@@ -43,6 +43,7 @@ TestModule_3DRender::TestModule_3DRender()
     , m_ambientLight(0.12f, 0.12f, 0.12f)
     , m_lightingEnabled(true)
 {
+    syncLightAnglesFromDirection();
     m_cube = ST::Mesh::createCube(1.0f); // unit cube, edge length 1, centered at origin
     m_builtinShader = std::make_shared<ST::BuiltinShaderProgram>(m_vertexShader, m_fragmentShader);
     m_activeShader = m_builtinShader;
@@ -95,9 +96,6 @@ void TestModule_3DRender::scanShaderCatalog() {
     }
 
     m_selectedShaderIndex = m_shaderCatalog.findByRelativePath(previousPath);
-    if (m_selectedShaderIndex < 0 && !m_shaderCatalog.getEntries().empty()) {
-        m_selectedShaderIndex = 0;
-    }
     m_shaderError.clear();
 }
 
@@ -126,6 +124,14 @@ bool TestModule_3DRender::selectShaderIndex(int index) {
     loadSelectedShader();
     needsRerender = true;
     return m_shaderError.empty();
+}
+
+void TestModule_3DRender::useBuiltinShader() {
+    m_selectedShaderIndex = -1;
+    m_shaderManager.clear();
+    m_activeShader = m_builtinShader;
+    m_shaderError.clear();
+    needsRerender = true;
 }
 
 void TestModule_3DRender::pollShaderReload() {
@@ -226,6 +232,19 @@ bool TestModule_3DRender::selectModelIndex(int index) {
     return loadSelectedModel();
 }
 
+bool TestModule_3DRender::setLightDirection(const ST::Vector3& direction) {
+    if (direction.lengthSquared() <= 1e-8f) return false;
+    m_light.direction = direction.normalized();
+    syncLightAnglesFromDirection();
+    needsRerender = true;
+    return true;
+}
+
+void TestModule_3DRender::setLightIntensity(float intensity) {
+    m_light.intensity = std::clamp(intensity, 0.0f, 5.0f);
+    needsRerender = true;
+}
+
 void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
                                    const ST::Matrix4x4& model,
                                    const ST::Matrix4x4& view,
@@ -245,6 +264,11 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
         return m_fragmentShader.sampleTexture(uv);
     };
     const auto shader = m_activeShader ? m_activeShader : m_builtinShader;
+    // Imported meshes normally carry authored normals (or normals generated
+    // by the OBJ loader), so use smooth perspective-correct interpolation by
+    // default. The procedural fallback cube has shared corners and therefore
+    // still needs geometric face normals to preserve its hard edges.
+    const bool useFlatShading = m_flatShading || !m_modelLoaded;
 
     const auto& verts = mesh.getVertices();
     const auto& idx = mesh.getIndices();
@@ -305,16 +329,18 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
         auto dispatchOne = [&](const ST::VertexOut& a,
                               const ST::VertexOut& b,
                               const ST::VertexOut& c) {
-            auto frag = [this, shader, &shaderContext, faceNormal, cameraInside](const ST::VertexOut& f) {
+            auto frag = [this, shader, &shaderContext, faceNormal, cameraInside, useFlatShading](const ST::VertexOut& f) {
                 if (shader != m_builtinShader) return shader->fragment(f, shaderContext);
                 if (!m_lightingEnabled) return f.color;
 
-                // createCube() shares its eight corners, so vertex normals
-                // cannot represent hard cube edges. Use the geometric face
-                // normal for this demo and flip it for an interior view so
-                // inner walls receive light from sources inside the cube.
+                // Smooth mode keeps the perspective-correct interpolated
+                // vertex normal produced by Rasterizer. Flat mode replaces it
+                // with the geometric face normal. The latter is also required
+                // for the procedural cube, whose eight corners are shared.
                 ST::VertexOut lit = f;
-                lit.normal = cameraInside ? -faceNormal : faceNormal;
+                if (useFlatShading) {
+                    lit.normal = cameraInside ? -faceNormal : faceNormal;
+                }
                 return shader->fragment(lit, shaderContext);
             };
             m_rasterizer.rasterizeTriangle(a, b, c, frag);
@@ -476,6 +502,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
 
     SDL_UpdateTexture(m_outputTexture, nullptr, m_rgba32Buffer.data(), renderW * sizeof(uint32_t));
     SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
+    drawLightGizmo(renderer, canvasW, canvasH, view, projection, model);
 }
 
 bool TestModule_3DRender::renderControls() {
@@ -506,23 +533,112 @@ bool TestModule_3DRender::renderControls() {
     ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Lighting (Blinn-Phong)");
     ImGui::Separator();
     changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
+    changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
+    changed |= ImGui::Checkbox("Flat shading", &m_flatShading);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Off: interpolate vertex normals (smooth)\nOn: use one geometric normal per triangle");
+    }
     changed |= ImGui::ColorEdit3("Light color", &m_light.color.r);
+    const ST::Vector3 directionBeforeEdit = m_light.direction;
     changed |= ImGui::DragFloat3("Light direction", &m_light.direction.x, 0.02f, -1.0f, 1.0f);
     if (m_light.direction.lengthSquared() < 1e-8f) {
         m_light.direction = ST::Vector3(0.0f, -1.0f, 0.0f);
     } else {
         m_light.direction.normalize();
     }
+    if (m_light.direction != directionBeforeEdit) syncLightAnglesFromDirection();
     changed |= ImGui::SliderFloat("Light intensity", &m_light.intensity, 0.0f, 5.0f);
     changed |= ImGui::ColorEdit3("Material diffuse", &m_material.diffuse.x);
     changed |= ImGui::ColorEdit3("Material specular", &m_material.specular.x);
     changed |= ImGui::SliderFloat("Shininess", &m_material.shininess, 1.0f, 256.0f);
     changed |= ImGui::ColorEdit3("Ambient", &m_ambientLight.x);
+    if (ImGui::Button("Reset Light")) {
+        m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
+        m_light.color = ST::Color::white();
+        m_light.intensity = 1.4f;
+        syncLightAnglesFromDirection();
+        changed = true;
+    }
 
     changed |= renderShaderControls();
     changed |= renderModelControls();
     if (changed) needsRerender = true;
     return changed;
+}
+
+void TestModule_3DRender::syncLightAnglesFromDirection() {
+    const ST::Vector3 sourceDirection = (-m_light.direction).normalized();
+    m_lightPitch = std::asin(std::clamp(sourceDirection.y, -1.0f, 1.0f));
+    m_lightYaw = std::atan2(sourceDirection.x, sourceDirection.z);
+}
+
+void TestModule_3DRender::updateLightDirectionFromAngles() {
+    const float cp = std::cos(m_lightPitch);
+    const ST::Vector3 sourceDirection(
+        cp * std::sin(m_lightYaw),
+        std::sin(m_lightPitch),
+        cp * std::cos(m_lightYaw));
+    m_light.direction = -sourceDirection;
+}
+
+void TestModule_3DRender::drawLightGizmo(SDL_Renderer* renderer,
+                                        int canvasW, int canvasH,
+                                        const ST::Matrix4x4& view,
+                                        const ST::Matrix4x4& projection,
+                                        const ST::Matrix4x4& model)
+{
+    if (!renderer || !m_showLightGizmo || !m_lightingEnabled) return;
+
+    const ST::Vector3 center = m_modelLoaded
+        ? (model * ST::Vector4(m_activeModel.boundsCenter, 1.0f)).toVector3()
+        : ST::Vector3::zero();
+    const ST::Vector3 sourceDirection = (-m_light.direction).normalized();
+    const float length = m_modelLoaded ? 1.35f : 1.4f;
+    const ST::Vector3 endpoint = center + sourceDirection * length;
+
+    auto project = [&](const ST::Vector3& world, int& x, int& y) {
+        const ST::Vector4 clip = projection * view * ST::Vector4(world, 1.0f);
+        if (!std::isfinite(clip.w) || std::fabs(clip.w) <= 1e-6f) return false;
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        if (!std::isfinite(ndcX) || !std::isfinite(ndcY)) return false;
+        x = static_cast<int>((ndcX + 1.0f) * 0.5f * canvasW);
+        y = static_cast<int>((1.0f - ndcY) * 0.5f * canvasH);
+        return true;
+    };
+
+    int centerX = 0, centerY = 0, endX = 0, endY = 0;
+    if (!project(center, centerX, centerY) || !project(endpoint, endX, endY)) return;
+    m_lightGizmoScreenX = endX;
+    m_lightGizmoScreenY = endY;
+
+    SDL_SetRenderDrawColor(renderer, 255, 190, 45, 255);
+    SDL_RenderDrawLine(renderer, centerX, centerY, endX, endY);
+    const float dx = static_cast<float>(endX - centerX);
+    const float dy = static_cast<float>(endY - centerY);
+    const float screenLength = std::sqrt(dx * dx + dy * dy);
+    if (screenLength > 1.0f) {
+        const float nx = dx / screenLength;
+        const float ny = dy / screenLength;
+        const float px = -ny;
+        const float py = nx;
+        const float arrowSize = 10.0f;
+        SDL_RenderDrawLine(renderer, endX, endY,
+                           static_cast<int>(endX - nx * arrowSize + px * arrowSize * 0.55f),
+                           static_cast<int>(endY - ny * arrowSize + py * arrowSize * 0.55f));
+        SDL_RenderDrawLine(renderer, endX, endY,
+                           static_cast<int>(endX - nx * arrowSize - px * arrowSize * 0.55f),
+                           static_cast<int>(endY - ny * arrowSize - py * arrowSize * 0.55f));
+    }
+    for (int i = 0; i < 16; ++i) {
+        const float a0 = static_cast<float>(i) * 2.0f * static_cast<float>(M_PI) / 16.0f;
+        const float a1 = static_cast<float>(i + 1) * 2.0f * static_cast<float>(M_PI) / 16.0f;
+        SDL_RenderDrawLine(renderer,
+                           static_cast<int>(endX + std::cos(a0) * 7.0f),
+                           static_cast<int>(endY + std::sin(a0) * 7.0f),
+                           static_cast<int>(endX + std::cos(a1) * 7.0f),
+                           static_cast<int>(endY + std::sin(a1) * 7.0f));
+    }
 }
 
 bool TestModule_3DRender::renderModelControls() {
@@ -598,6 +714,12 @@ bool TestModule_3DRender::renderShaderControls() {
             ? entries[m_selectedShaderIndex].displayName.c_str()
             : "Built-in shader";
         if (ImGui::BeginCombo("Current shader", preview)) {
+            const bool builtinSelected = m_selectedShaderIndex < 0;
+            if (ImGui::Selectable("Built-in Blinn-Phong", builtinSelected)) {
+                useBuiltinShader();
+                changed = true;
+            }
+            if (builtinSelected) ImGui::SetItemDefaultFocus();
             for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
                 const bool selected = i == m_selectedShaderIndex;
                 if (ImGui::Selectable(entries[i].displayName.c_str(), selected)) {
@@ -711,12 +833,42 @@ void TestModule_3DRender::onWheel(float /*dx*/, float dy,
 // cares about deltas, so screen-space (x,y) and canvas-space (cx,cy) are
 // interchangeable here.
 void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY) {
+    if (button == SDL_BUTTON_LEFT && m_showLightGizmo && m_lightingEnabled) {
+        const float dx = static_cast<float>(canvasX - m_lightGizmoScreenX);
+        const float dy = static_cast<float>(canvasY - m_lightGizmoScreenY);
+        if (dx * dx + dy * dy <= m_lightGizmoHitRadius * m_lightGizmoHitRadius) {
+            m_lightDragActive = true;
+            m_interactionActive = true;
+            m_lastCanvasX = canvasX;
+            m_lastCanvasY = canvasY;
+            needsRerender = true;
+            return;
+        }
+    }
     onMouseDown(button, canvasX, canvasY);
 }
 void TestModule_3DRender::onCanvasMouseUp(int button, int canvasX, int canvasY) {
     (void)canvasX; (void)canvasY;
+    if (m_lightDragActive && button == SDL_BUTTON_LEFT) {
+        m_lightDragActive = false;
+        m_interactionActive = false;
+        needsRerender = true;
+        return;
+    }
     onMouseUp(button);
 }
 void TestModule_3DRender::onCanvasMouseMove(int canvasX, int canvasY) {
+    if (m_lightDragActive) {
+        const int dx = canvasX - m_lastCanvasX;
+        const int dy = canvasY - m_lastCanvasY;
+        m_lastCanvasX = canvasX;
+        m_lastCanvasY = canvasY;
+        m_lightYaw -= static_cast<float>(dx) * 0.012f;
+        m_lightPitch = std::clamp(m_lightPitch + static_cast<float>(dy) * 0.012f,
+                                  -1.5f, 1.5f);
+        updateLightDirectionFromAngles();
+        needsRerender = true;
+        return;
+    }
     onMouseMove(canvasX, canvasY);
 }

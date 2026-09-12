@@ -177,8 +177,8 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "select_shader",
         "title": "Select a 3D Render shader",
-        "description": "Select a repository shader by its catalog index and rerender 3D Render.",
-        "inputSchema": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0}}, "required": ["index"], "additionalProperties": False},
+        "description": "Select a repository shader by its catalog index, or use index -1 for the built-in Blinn-Phong shader.",
+        "inputSchema": {"type": "object", "properties": {"index": {"type": "integer", "minimum": -1}}, "required": ["index"], "additionalProperties": False},
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
@@ -193,6 +193,27 @@ TOOLS: list[dict[str, Any]] = [
         "title": "Select a 3D Render model",
         "description": "Select a repository OBJ model by catalog index and rerender 3D Render.",
         "inputSchema": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0}}, "required": ["index"], "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "get_light",
+        "title": "Read 3D Render light",
+        "description": "Read the active direction light settings from 3D Render.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "set_light",
+        "title": "Set 3D Render light",
+        "description": "Set the active direction light direction and/or intensity.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "intensity": {"type": "number", "minimum": 0, "maximum": 5},
+            },
+            "additionalProperties": False,
+        },
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
@@ -309,6 +330,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "select_model":
         result = _send_app_command("select_model", arguments)
         return _text_result(f"Selected model index {result.get('selectedModel', '')}.", result)
+    if name == "get_light":
+        result = _send_app_command("get_light")
+        return _text_result("Read the active 3D Render light.", result)
+    if name == "set_light":
+        result = _send_app_command("set_light", arguments)
+        return _text_result("Updated the active 3D Render light.", result)
     if name == "get_console_output":
         result = _send_app_command("get_console_output")
         output = str(result.get("output", ""))

@@ -356,7 +356,9 @@ int main(int argc, char* argv[]) {
                 if (params.contains("index") && params["index"].is_number_integer()) {
                     shaderIndex = params["index"].get<int>();
                 }
-                if (shaderIndex < 0 || !render3D->selectShaderIndex(shaderIndex)) {
+                if (shaderIndex == -1) {
+                    render3D->useBuiltinShader();
+                } else if (!render3D->selectShaderIndex(shaderIndex)) {
                     throw std::runtime_error(render3D->getShaderError().empty()
                         ? "Shader index was not found or failed to load"
                         : render3D->getShaderError());
@@ -421,6 +423,38 @@ int main(int argc, char* argv[]) {
                 { "partCount", model ? static_cast<int>(model->parts.size()) : 1 },
                 { "materialCount", model ? static_cast<int>(model->materials.size()) : 0 },
                 { "models", models }
+            };
+        }
+
+        if (command == "get_light" || command == "set_light") {
+            auto* selected = selectedLeaf();
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selected);
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+
+            if (command == "set_light") {
+                if (params.contains("direction") && params["direction"].is_array() &&
+                    params["direction"].size() == 3) {
+                    const ST::Vector3 direction(
+                        params["direction"][0].get<float>(),
+                        params["direction"][1].get<float>(),
+                        params["direction"][2].get<float>());
+                    if (!render3D->setLightDirection(direction)) {
+                        throw std::runtime_error("Light direction must be non-zero");
+                    }
+                }
+                if (params.contains("intensity") && params["intensity"].is_number()) {
+                    render3D->setLightIntensity(params["intensity"].get<float>());
+                }
+                runModule(selectedModule);
+            }
+
+            const ST::Light& light = render3D->getLight();
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "enabled", true },
+                { "direction", { light.direction.x, light.direction.y, light.direction.z } },
+                { "color", { light.color.r, light.color.g, light.color.b, light.color.a } },
+                { "intensity", light.intensity }
             };
         }
 

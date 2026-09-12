@@ -41,12 +41,16 @@ public:
     int getSelectedShaderIndex() const { return m_selectedShaderIndex; }
     const std::string& getShaderError() const { return m_shaderError; }
     bool selectShaderIndex(int index);
+    void useBuiltinShader();
     const std::vector<ST::ModelEntry>& getModelEntries() const { return m_modelCatalog.getEntries(); }
     int getSelectedModelIndex() const { return m_selectedModelIndex; }
     const std::string& getModelError() const { return m_modelError; }
     const std::string& getModelTextureStatus() const { return m_modelTextureStatus; }
     bool selectModelIndex(int index);
     const ST::ModelAsset* getActiveModel() const { return m_modelLoaded ? &m_activeModel : nullptr; }
+    const ST::Light& getLight() const { return m_light; }
+    bool setLightDirection(const ST::Vector3& direction);
+    void setLightIntensity(float intensity);
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
@@ -69,6 +73,13 @@ private:
     void scanModelCatalog();
     bool loadSelectedModel();
     bool renderModelControls();
+    void drawLightGizmo(SDL_Renderer* renderer,
+                        int canvasW, int canvasH,
+                        const ST::Matrix4x4& view,
+                        const ST::Matrix4x4& projection,
+                        const ST::Matrix4x4& model);
+    void syncLightAnglesFromDirection();
+    void updateLightDirectionFromAngles();
 
     ST::FrameBuffer* m_frameBuffer;
     ST::DepthBuffer* m_depthBuffer;
@@ -79,6 +90,14 @@ private:
     ST::Light m_light;
     ST::Vector3 m_ambientLight;
     bool m_lightingEnabled;
+    bool m_flatShading = false;
+    bool m_showLightGizmo = true;
+    bool m_lightDragActive = false;
+    int m_lightGizmoScreenX = 0;
+    int m_lightGizmoScreenY = 0;
+    float m_lightGizmoHitRadius = 24.0f;
+    float m_lightYaw = 0.0f;
+    float m_lightPitch = 0.0f;
 
     ST::Mesh m_cube;
     ST::ModelAsset m_activeModel;
