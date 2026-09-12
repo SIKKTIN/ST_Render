@@ -79,6 +79,17 @@ try:
     deleted = request("tools/call", {"name": "delete_scene_object", "arguments": {}})
     assert len(deleted["structuredContent"]["objects"]) == 2, deleted
 
+    saved_scene = request("tools/call", {
+        "name": "save_scene",
+        "arguments": {"path": "Data/Scenes/live_smoke.scene.json"},
+    })
+    assert saved_scene["structuredContent"]["objectCount"] == 2, saved_scene
+    loaded_scene = request("tools/call", {
+        "name": "load_scene",
+        "arguments": {"path": "Data/Scenes/live_smoke.scene.json"},
+    })
+    assert loaded_scene["structuredContent"]["objectCount"] == 2, loaded_scene
+
     captured = request("tools/call", {"name": "capture_canvas", "arguments": {}})
     assert any(item.get("type") == "image" for item in captured["content"]), captured
     capture_path = Path(captured["structuredContent"]["path"])

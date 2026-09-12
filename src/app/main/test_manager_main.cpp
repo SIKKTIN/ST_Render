@@ -268,6 +268,7 @@ int main(int argc, char* argv[]) {
         return -1;
     };
     std::string consoleOutput;
+    std::filesystem::path currentScenePath = "Data/Scenes/last.scene.json";
     float consoleHeight = 120.0f;
     float createObjPanelW = Layout::CREATE_PANEL_W;
     float leftPanelW      = Layout::LEFT_PANEL_W;
@@ -559,6 +560,27 @@ int main(int argc, char* argv[]) {
             };
         }
 
+        if (command == "save_scene" || command == "load_scene") {
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+            if (params.contains("path") && params["path"].is_string()) {
+                currentScenePath = params["path"].get<std::string>();
+            }
+            std::string sceneError;
+            const std::string scenePath = currentScenePath.string();
+            const bool success = command == "save_scene"
+                ? render3D->saveScene(scenePath, sceneError)
+                : render3D->loadScene(scenePath, sceneError);
+            if (!success) throw std::runtime_error(sceneError);
+            runModule(selectedModule);
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "path", scenePath },
+                { "selectedObject", render3D->getSelectedSceneObjectIndex() },
+                { "objectCount", static_cast<int>(render3D->getSceneObjectInfos().size()) }
+            };
+        }
+
         if (command == "list_scene_objects" || command == "add_scene_object" ||
             command == "select_scene_object" || command == "duplicate_scene_object" ||
             command == "delete_scene_object" || command == "set_scene_object_transform") {
@@ -738,6 +760,26 @@ int main(int argc, char* argv[]) {
 
     controlBridge.updateState(buildControlState(), true);
 
+    auto saveCurrentScene = [&]() {
+        auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
+        if (!render3D) return false;
+        std::string sceneError;
+        const bool saved = render3D->saveScene(currentScenePath.string(), sceneError);
+        consoleOutput = saved ? "Saved scene: " + currentScenePath.string()
+                              : "Save scene failed: " + sceneError;
+        return saved;
+    };
+    auto loadCurrentScene = [&]() {
+        auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
+        if (!render3D) return false;
+        std::string sceneError;
+        const bool loaded = render3D->loadScene(currentScenePath.string(), sceneError);
+        consoleOutput = loaded ? "Loaded scene: " + currentScenePath.string()
+                               : "Load scene failed: " + sceneError;
+        if (loaded) runModule(selectedModule);
+        return loaded;
+    };
+
     while (running) {
         SDL_GetWindowSize(window, &windowWidth, &windowHeight);
         SDL_Event event;
@@ -757,6 +799,11 @@ int main(int argc, char* argv[]) {
                 if (auto* m = selectedLeaf()) m->needsRerender = true;
             }
             if (event.type == SDL_KEYDOWN) {
+                if ((event.key.keysym.mod & KMOD_CTRL) && event.key.keysym.sym == SDLK_s) {
+                    saveCurrentScene();
+                } else if ((event.key.keysym.mod & KMOD_CTRL) && event.key.keysym.sym == SDLK_o) {
+                    loadCurrentScene();
+                }
                 deliverToLeaf([&](IModule* m) { m->onKeyDown(event.key.keysym.sym); });
                 if (event.key.keysym.sym == SDLK_ESCAPE) running = false;
             }
@@ -909,9 +956,9 @@ int main(int argc, char* argv[]) {
         float menuBarH = Layout::MENU_BAR_H; // refined to true height after EndMainMenuBar()
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-                ImGui::MenuItem("Open Scene...", "Ctrl+O", false, false);
-                ImGui::MenuItem("Save Scene", "Ctrl+S", false, false);
-                ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S", false, false);
+                if (ImGui::MenuItem("Open Last Scene", "Ctrl+O")) loadCurrentScene();
+                if (ImGui::MenuItem("Save Scene", "Ctrl+S")) saveCurrentScene();
+                ImGui::TextDisabled("Path: %s", currentScenePath.string().c_str());
                 ImGui::Separator();
                 if (ImGui::MenuItem("Exit", "Alt+F4")) { running = false; }
                 ImGui::EndMenu();

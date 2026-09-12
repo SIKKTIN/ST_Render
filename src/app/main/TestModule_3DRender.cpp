@@ -3,7 +3,10 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -426,6 +429,220 @@ void TestModule_3DRender::applyEditorSettings(const EditorSettings& settings) {
     m_moveSpeed = std::clamp(settings.cameraSpeed, m_moveSpeedMin, m_moveSpeedMax);
     m_cameraSensitivity = std::clamp(settings.cameraSensitivity, 0.001f, 0.1f);
     needsRerender = true;
+}
+
+bool TestModule_3DRender::saveScene(const std::string& path, std::string& error) const {
+    using Json = nlohmann::json;
+    auto vectorJson = [](const ST::Vector3& value) {
+        return Json{ value.x, value.y, value.z };
+    };
+    auto colorJson = [](const ST::Color& value) {
+        return Json{ value.r, value.g, value.b, value.a };
+    };
+
+    Json scene = {
+        { "version", 1 },
+        { "camera", {
+            { "eye", vectorJson(m_eye) },
+            { "yaw", m_yaw },
+            { "pitch", m_pitch },
+            { "moveSpeed", m_moveSpeed }
+        } },
+        { "lighting", {
+            { "enabled", m_lightingEnabled },
+            { "ambient", vectorJson(m_ambientLight) },
+            { "direction", vectorJson(m_light.direction) },
+            { "color", colorJson(m_light.color) },
+            { "intensity", m_light.intensity }
+        } },
+        { "material", {
+            { "ambient", vectorJson(m_material.ambient) },
+            { "diffuse", vectorJson(m_material.diffuse) },
+            { "specular", vectorJson(m_material.specular) },
+            { "shininess", m_material.shininess }
+        } },
+        { "shader", (m_selectedShaderIndex >= 0 &&
+                      m_selectedShaderIndex < static_cast<int>(m_shaderCatalog.getEntries().size()))
+            ? m_shaderCatalog.getEntries()[m_selectedShaderIndex].relativePath
+            : std::string() },
+        { "selectedObject", m_selectedSceneObject },
+        { "objects", Json::array() }
+    };
+
+    for (const SceneObject& object : m_sceneObjects) {
+        scene["objects"].push_back({
+            { "id", object.id },
+            { "name", object.name },
+            { "model", object.modelPath },
+            { "visible", object.visible },
+            { "position", vectorJson(object.position) },
+            { "rotation", vectorJson(object.rotation) },
+            { "scale", vectorJson(object.scale) },
+            { "material", {
+                { "ambient", vectorJson(object.material.ambient) },
+                { "diffuse", vectorJson(object.material.diffuse) },
+                { "specular", vectorJson(object.material.specular) },
+                { "shininess", object.material.shininess }
+            } }
+        });
+    }
+
+    try {
+        const std::filesystem::path outputPath(path);
+        if (!outputPath.parent_path().empty()) {
+            std::filesystem::create_directories(outputPath.parent_path());
+        }
+        std::ofstream output(outputPath);
+        if (!output) {
+            error = "unable to open scene for writing: " + path;
+            return false;
+        }
+        output << scene.dump(2) << '\n';
+        if (!output.good()) {
+            error = "unable to write scene: " + path;
+            return false;
+        }
+    } catch (const std::exception& exception) {
+        error = exception.what();
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+bool TestModule_3DRender::loadScene(const std::string& path, std::string& error) {
+    using Json = nlohmann::json;
+    auto readVector = [](const Json& value, const char* name) {
+        if (!value.is_array() || value.size() != 3) {
+            throw std::runtime_error(std::string(name) + " must contain three numbers");
+        }
+        return ST::Vector3(value[0].get<float>(), value[1].get<float>(), value[2].get<float>());
+    };
+    auto readColor = [](const Json& value, const char* name) {
+        if (!value.is_array() || (value.size() != 3 && value.size() != 4)) {
+            throw std::runtime_error(std::string(name) + " must contain three or four numbers");
+        }
+        return ST::Color(value[0].get<float>(), value[1].get<float>(), value[2].get<float>(),
+                         value.size() == 4 ? value[3].get<float>() : 1.0f);
+    };
+
+    try {
+        std::ifstream input(path);
+        if (!input) {
+            error = "scene file not found: " + path;
+            return false;
+        }
+        Json scene;
+        input >> scene;
+        if (!scene.is_object() || scene.value("version", 0) != 1) {
+            error = "unsupported scene version";
+            return false;
+        }
+        if (!scene.contains("objects") || !scene["objects"].is_array()) {
+            error = "scene objects array is missing";
+            return false;
+        }
+
+        std::vector<SceneObject> previousObjects = std::move(m_sceneObjects);
+        const int previousSelected = m_selectedSceneObject;
+        const int previousNextId = m_nextSceneObjectId;
+        const int previousModelIndex = m_selectedModelIndex;
+        const bool previousModelLoaded = m_modelLoaded;
+        const std::string previousTextureStatus = m_modelTextureStatus;
+        m_sceneObjects.clear();
+
+        int maxId = 0;
+        for (const Json& savedObject : scene["objects"]) {
+            const std::string modelPath = savedObject.value("model", std::string());
+            const int modelIndex = m_modelCatalog.findByRelativePath(modelPath);
+            if (modelIndex < 0) {
+                m_sceneObjects = std::move(previousObjects);
+                m_selectedSceneObject = previousSelected;
+                m_nextSceneObjectId = previousNextId;
+                m_selectedModelIndex = previousModelIndex;
+                m_modelLoaded = previousModelLoaded;
+                m_modelTextureStatus = previousTextureStatus;
+                error = "model asset not found: " + modelPath;
+                return false;
+            }
+
+            SceneObject object;
+            object.id = savedObject.value("id", maxId + 1);
+            object.name = savedObject.value("name", m_modelCatalog.getEntries()[modelIndex].displayName);
+            object.visible = savedObject.value("visible", true);
+            if (savedObject.contains("position")) object.position = readVector(savedObject["position"], "position");
+            if (savedObject.contains("rotation")) object.rotation = readVector(savedObject["rotation"], "rotation");
+            if (savedObject.contains("scale")) object.scale = readVector(savedObject["scale"], "scale");
+            object.scale.x = std::clamp(object.scale.x, 0.01f, 100.0f);
+            object.scale.y = std::clamp(object.scale.y, 0.01f, 100.0f);
+            object.scale.z = std::clamp(object.scale.z, 0.01f, 100.0f);
+            object.modelIndex = modelIndex;
+            object.modelPath = modelPath;
+            m_sceneObjects.push_back(std::move(object));
+            const int objectIndex = static_cast<int>(m_sceneObjects.size()) - 1;
+            if (!replaceSceneObjectModel(objectIndex, modelIndex)) {
+                m_sceneObjects = std::move(previousObjects);
+                m_selectedSceneObject = previousSelected;
+                m_nextSceneObjectId = previousNextId;
+                m_selectedModelIndex = previousModelIndex;
+                m_modelLoaded = previousModelLoaded;
+                m_modelTextureStatus = previousTextureStatus;
+                error = m_modelError.empty() ? "unable to load scene model" : m_modelError;
+                return false;
+            }
+            if (savedObject.contains("material")) {
+                const Json& material = savedObject["material"];
+                if (material.contains("ambient")) m_sceneObjects.back().material.ambient = readVector(material["ambient"], "material ambient");
+                if (material.contains("diffuse")) m_sceneObjects.back().material.diffuse = readVector(material["diffuse"], "material diffuse");
+                if (material.contains("specular")) m_sceneObjects.back().material.specular = readVector(material["specular"], "material specular");
+                m_sceneObjects.back().material.shininess = std::clamp(material.value("shininess", 32.0f), 1.0f, 256.0f);
+            }
+            maxId = std::max(maxId, m_sceneObjects.back().id);
+        }
+
+        m_nextSceneObjectId = maxId + 1;
+        if (scene.contains("camera")) {
+            const Json& camera = scene["camera"];
+            if (camera.contains("eye")) m_eye = readVector(camera["eye"], "camera eye");
+            m_yaw = camera.value("yaw", m_yaw);
+            m_pitch = std::clamp(camera.value("pitch", m_pitch), -1.5f, 1.5f);
+            m_moveSpeed = std::clamp(camera.value("moveSpeed", m_moveSpeed), m_moveSpeedMin, m_moveSpeedMax);
+        }
+        if (scene.contains("lighting")) {
+            const Json& lighting = scene["lighting"];
+            m_lightingEnabled = lighting.value("enabled", m_lightingEnabled);
+            if (lighting.contains("ambient")) m_ambientLight = readVector(lighting["ambient"], "ambient");
+            if (lighting.contains("direction")) setLightDirection(readVector(lighting["direction"], "light direction"));
+            if (lighting.contains("color")) m_light.color = readColor(lighting["color"], "light color");
+            m_light.intensity = std::clamp(lighting.value("intensity", m_light.intensity), 0.0f, 5.0f);
+        }
+        if (scene.contains("material")) {
+            const Json& material = scene["material"];
+            if (material.contains("ambient")) m_material.ambient = readVector(material["ambient"], "material ambient");
+            if (material.contains("diffuse")) m_material.diffuse = readVector(material["diffuse"], "material diffuse");
+            if (material.contains("specular")) m_material.specular = readVector(material["specular"], "material specular");
+            m_material.shininess = std::clamp(material.value("shininess", m_material.shininess), 1.0f, 256.0f);
+        }
+
+        const std::string shaderPath = scene.value("shader", std::string());
+        const int shaderIndex = m_shaderCatalog.findByRelativePath(shaderPath);
+        if (shaderIndex >= 0) {
+            selectShaderIndex(shaderIndex);
+        } else {
+            useBuiltinShader();
+        }
+
+        const int selectedObject = scene.value("selectedObject", -1);
+        selectSceneObject(selectedObject >= 0 && selectedObject < static_cast<int>(m_sceneObjects.size())
+            ? selectedObject : (m_sceneObjects.empty() ? -1 : 0));
+        m_modelError.clear();
+        needsRerender = true;
+    } catch (const std::exception& exception) {
+        error = exception.what();
+        return false;
+    }
+    error.clear();
+    return true;
 }
 
 ST::Matrix4x4 TestModule_3DRender::buildSceneObjectMatrix(int objectIndex) const {

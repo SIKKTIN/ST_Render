@@ -175,6 +175,20 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "save_scene",
+        "title": "Save 3D scene",
+        "description": "Save the current 3D Render scene as a versioned JSON file. Omit path to use the current scene path.",
+        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "load_scene",
+        "title": "Load 3D scene",
+        "description": "Load a versioned JSON scene file into 3D Render. Omit path to use the current scene path.",
+        "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "list_shaders",
         "title": "List 3D Render shaders",
         "description": "List shader scripts available to the 3D Render module.",
@@ -382,6 +396,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return _text_result(
             f"Set render resolution to {canvas.get('width', '?')}x{canvas.get('height', '?')}.", result
         )
+    if name == "save_scene":
+        result = _send_app_command("save_scene", arguments)
+        return _text_result(f"Saved scene to {result.get('path', '')}.", result)
+    if name == "load_scene":
+        result = _send_app_command("load_scene", arguments)
+        return _text_result(f"Loaded scene from {result.get('path', '')}.", result)
     if name == "list_shaders":
         result = _send_app_command("list_shaders")
         return _text_result(f"Found {len(result.get('shaders', []))} shaders.", result)

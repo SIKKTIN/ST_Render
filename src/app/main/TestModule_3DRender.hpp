@@ -84,6 +84,8 @@ public:
     };
     EditorSettings getEditorSettings() const;
     void applyEditorSettings(const EditorSettings& settings);
+    bool saveScene(const std::string& path, std::string& error) const;
+    bool loadScene(const std::string& path, std::string& error);
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
