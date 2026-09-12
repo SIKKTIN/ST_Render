@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <algorithm>
+#include <iterator>
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
@@ -38,11 +39,26 @@ namespace Layout {
     constexpr float RIGHT_PANEL_MIN   = 120.0f;
     constexpr float RIGHT_PANEL_MAX   = 480.0f;
     constexpr float TOP_AREA_H        = 550.0f;     // controls panel height
-    constexpr int   CANVAS_W          = 640;        // render-target size
-    constexpr int   CANVAS_H          = 480;        // render-target size
     constexpr int   SPLITTER_HALF_W   = 4;          // vertical splitter strip width / 2
-    constexpr int   CANVAS_Y0         = 24;         // = (int)MENU_BAR_H; canvas screen Y start
 }
+
+struct RenderResolution {
+    const char* label;
+    int width;
+    int height;
+};
+
+constexpr RenderResolution kRenderResolutions[] = {
+    { "640 x 480 (4:3)", 640, 480 },
+    { "800 x 600 (4:3)", 800, 600 },
+    { "960 x 540 (16:9)", 960, 540 },
+    { "1280 x 720 (16:9)", 1280, 720 }
+};
+
+struct RenderSettings {
+    int width = 640;
+    int height = 480;
+};
 
 int main(int argc, char* argv[]) {
     std::cout << "=== ST Render - Test Manager ===" << std::endl;
@@ -71,6 +87,10 @@ int main(int argc, char* argv[]) {
     SDL_SetWindowMinimumSize(window, 900, 500);
     int windowWidth = Layout::WINDOW_W;
     int windowHeight = Layout::WINDOW_H;
+    RenderSettings renderSettings;
+    int currentResolutionIndex = 0;
+    int pendingResolutionIndex = 0;
+    bool settingsOpen = false;
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
@@ -225,7 +245,7 @@ int main(int argc, char* argv[]) {
         renderer,
         SDL_PIXELFORMAT_RGBA32,
         SDL_TEXTUREACCESS_TARGET,
-        Layout::CANVAS_W, Layout::CANVAS_H
+        renderSettings.width, renderSettings.height
     );
     if (!canvas) {
         std::cerr << "SDL_CreateTexture(canvas) failed: " << SDL_GetError() << std::endl;
@@ -243,9 +263,27 @@ int main(int argc, char* argv[]) {
         m->runConsole(consoleOutput);
         if (rerender) {
             SDL_SetRenderTarget(renderer, canvas);
-            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+            m->render(renderer, renderSettings.width, renderSettings.height);
             SDL_SetRenderTarget(renderer, nullptr);
         }
+    };
+
+    auto recreateCanvas = [&]() {
+        SDL_Texture* replacement = SDL_CreateTexture(
+            renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_TARGET,
+            renderSettings.width, renderSettings.height);
+        if (!replacement) {
+            std::cerr << "SDL_CreateTexture(canvas) failed after resolution change: "
+                      << SDL_GetError() << std::endl;
+            return false;
+        }
+        SDL_DestroyTexture(canvas);
+        canvas = replacement;
+        if (auto* m = selectedLeaf()) m->needsRerender = true;
+        runModule(selectedModule);
+        return true;
     };
     runModule(selectedModule);
 
@@ -310,7 +348,7 @@ int main(int argc, char* argv[]) {
             { "application", "ST_Render_Manager" },
             { "running", running },
             { "selectedModule", selectedLeaf() ? selectedLeaf()->getName() : "" },
-            { "canvas", { { "width", Layout::CANVAS_W }, { "height", Layout::CANVAS_H } } },
+            { "canvas", { { "width", renderSettings.width }, { "height", renderSettings.height } } },
             { "consoleOutput", consoleOutput },
             { "modules", modules }
         };
@@ -318,7 +356,7 @@ int main(int argc, char* argv[]) {
 
     auto saveCanvasBitmap = [&](const std::filesystem::path& outputPath) {
         SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(
-            0, Layout::CANVAS_W, Layout::CANVAS_H, 32, SDL_PIXELFORMAT_RGBA32);
+            0, renderSettings.width, renderSettings.height, 32, SDL_PIXELFORMAT_RGBA32);
         if (!surface) throw std::runtime_error(SDL_GetError());
 
         SDL_Texture* previousTarget = SDL_GetRenderTarget(renderer);
@@ -347,6 +385,23 @@ int main(int argc, char* argv[]) {
             "params", ST::AppControlBridge::Json::object());
 
         if (command == "list_modules" || command == "get_status") {
+            return buildControlState();
+        }
+
+        if (command == "set_resolution") {
+            int preset = -1;
+            if (params.contains("preset") && params["preset"].is_number_integer()) {
+                preset = params["preset"].get<int>();
+            }
+            if (preset < 0 || preset >= static_cast<int>(std::size(kRenderResolutions))) {
+                throw std::runtime_error("Resolution preset was not found");
+            }
+            renderSettings.width = kRenderResolutions[preset].width;
+            renderSettings.height = kRenderResolutions[preset].height;
+            currentResolutionIndex = preset;
+            pendingResolutionIndex = preset;
+            if (!recreateCanvas()) throw std::runtime_error("Failed to recreate render canvas");
+            controlBridge.updateState(buildControlState(), true);
             return buildControlState();
         }
 
@@ -519,8 +574,8 @@ int main(int argc, char* argv[]) {
                 { "module", selectedLeaf() ? selectedLeaf()->getName() : "" },
                 { "path", outputPath.string() },
                 { "mimeType", "image/bmp" },
-                { "width", Layout::CANVAS_W },
-                { "height", Layout::CANVAS_H }
+                { "width", renderSettings.width },
+                { "height", renderSettings.height }
             };
         }
 
@@ -603,8 +658,8 @@ int main(int argc, char* argv[]) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * Layout::CANVAS_W / screenW;
-                        cy = cy * Layout::CANVAS_H / screenH;
+                        cx = cx * renderSettings.width / screenW;
+                        cy = cy * renderSettings.height / screenH;
                     }
                     mod->onCanvasMouseMove(cx, cy);
                     canvasHandled = true;
@@ -612,8 +667,8 @@ int main(int argc, char* argv[]) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * Layout::CANVAS_W / screenW;
-                        cy = cy * Layout::CANVAS_H / screenH;
+                        cx = cx * renderSettings.width / screenW;
+                        cy = cy * renderSettings.height / screenH;
                     }
                     mod->onCanvasMouseDown(event.button.button, cx, cy);
                     canvasHandled = true;
@@ -621,8 +676,8 @@ int main(int argc, char* argv[]) {
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
                     if (screenW > 0 && screenH > 0) {
-                        cx = cx * Layout::CANVAS_W / screenW;
-                        cy = cy * Layout::CANVAS_H / screenH;
+                        cx = cx * renderSettings.width / screenW;
+                        cy = cy * renderSettings.height / screenH;
                     }
                     mod->onCanvasMouseUp(event.button.button, cx, cy);
                     canvasHandled = true;
@@ -655,11 +710,11 @@ int main(int argc, char* argv[]) {
                     // layout math but we still normalize both for safety).
                     int screenW = canvasMaxX - canvasMinX;
                     int screenH = canvasMaxY - canvasMinY;
-                    int cx = (wx - canvasMinX) * Layout::CANVAS_W / screenW;
-                    int cy = (wy - canvasMinY) * Layout::CANVAS_H / screenH;
+                    int cx = (wx - canvasMinX) * renderSettings.width / screenW;
+                    int cy = (wy - canvasMinY) * renderSettings.height / screenH;
                     entries[selectedModule].leaf.mod->onWheel(
                         (float)event.wheel.x, (float)event.wheel.y,
-                        cx, cy, Layout::CANVAS_W, Layout::CANVAS_H
+                        cx, cy, renderSettings.width, renderSettings.height
                     );
                 }
             }
@@ -677,7 +732,7 @@ int main(int argc, char* argv[]) {
             if (m->needsRerender) {
                 m->needsRerender = false;
                 SDL_SetRenderTarget(renderer, canvas);
-                m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+                m->render(renderer, renderSettings.width, renderSettings.height);
                 SDL_SetRenderTarget(renderer, nullptr);
                 runModule(selectedModule, false);
             }
@@ -703,6 +758,11 @@ int main(int argc, char* argv[]) {
                 ImGui::EndMenu();
             }
             if (ImGui::BeginMenu("Edit")) {
+                if (ImGui::MenuItem("Settings...")) {
+                    pendingResolutionIndex = currentResolutionIndex;
+                    settingsOpen = true;
+                }
+                ImGui::Separator();
                 ImGui::MenuItem("Undo", "Ctrl+Z", false, false);
                 ImGui::MenuItem("Redo", "Ctrl+Y", false, false);
                 ImGui::Separator();
@@ -731,6 +791,42 @@ int main(int argc, char* argv[]) {
             }
             menuBarH = ImGui::GetFrameHeight(); // actual rendered menu bar height
             ImGui::EndMainMenuBar();
+        }
+
+        if (settingsOpen) {
+            ImGui::SetNextWindowSize(ImVec2(420.0f, 220.0f), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("Settings", &settingsOpen)) {
+                ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Render Settings");
+                ImGui::Separator();
+                const char* resolutionLabels[] = {
+                    kRenderResolutions[0].label,
+                    kRenderResolutions[1].label,
+                    kRenderResolutions[2].label,
+                    kRenderResolutions[3].label
+                };
+                ImGui::Combo("Render resolution", &pendingResolutionIndex,
+                             resolutionLabels, IM_ARRAYSIZE(resolutionLabels));
+                ImGui::TextDisabled("Canvas keeps this aspect ratio while the window and panels resize.");
+                ImGui::Text("Active: %d x %d", renderSettings.width, renderSettings.height);
+                ImGui::Separator();
+                if (ImGui::Button("Apply")) {
+                    const auto& choice = kRenderResolutions[pendingResolutionIndex];
+                    const int oldWidth = renderSettings.width;
+                    const int oldHeight = renderSettings.height;
+                    renderSettings.width = choice.width;
+                    renderSettings.height = choice.height;
+                    if (recreateCanvas()) {
+                        currentResolutionIndex = pendingResolutionIndex;
+                        settingsOpen = false;
+                    } else {
+                        renderSettings.width = oldWidth;
+                        renderSettings.height = oldHeight;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) settingsOpen = false;
+            }
+            ImGui::End();
         }
 
         const float contentH = std::max(100.0f, static_cast<float>(windowHeight) - menuBarH);
@@ -865,8 +961,8 @@ int main(int argc, char* argv[]) {
                 // The software render target is deliberately fixed at 640x480
                 // (4:3). Fit it inside the resizable Output panel without
                 // stretching the model when side panels are dragged.
-                const float renderAspect = static_cast<float>(Layout::CANVAS_W) /
-                                           static_cast<float>(Layout::CANVAS_H);
+                const float renderAspect = static_cast<float>(renderSettings.width) /
+                                           static_cast<float>(renderSettings.height);
                 const float availableW = ImGui::GetContentRegionAvail().x;
                 float imageW = availableW;
                 float imageH = imageW / renderAspect;
@@ -1046,7 +1142,7 @@ int main(int argc, char* argv[]) {
         if (auto* m = selectedLeaf(); m && m->needsRerender) {
             m->needsRerender = false;
             SDL_SetRenderTarget(renderer, canvas);
-            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+            m->render(renderer, renderSettings.width, renderSettings.height);
             SDL_SetRenderTarget(renderer, nullptr);
         }
     }

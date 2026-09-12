@@ -168,6 +168,13 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "set_resolution",
+        "title": "Set render resolution",
+        "description": "Change the active render-target resolution using a preset: 0=640x480, 1=800x600, 2=960x540, 3=1280x720.",
+        "inputSchema": {"type": "object", "properties": {"preset": {"type": "integer", "minimum": 0, "maximum": 3}}, "required": ["preset"], "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "list_shaders",
         "title": "List 3D Render shaders",
         "description": "List shader scripts available to the 3D Render module.",
@@ -226,7 +233,7 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "capture_canvas",
         "title": "Capture the ST Render canvas",
-        "description": "Rerender and return the current 640x480 application canvas as an image.",
+        "description": "Rerender and return the current application canvas at the active render resolution as an image.",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
     },
@@ -318,6 +325,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "rerender":
         result = _send_app_command("rerender")
         return _text_result(f"Rerendered {result.get('selectedModule', '')}.", result)
+    if name == "set_resolution":
+        result = _send_app_command("set_resolution", arguments)
+        canvas = result.get("canvas", {})
+        return _text_result(
+            f"Set render resolution to {canvas.get('width', '?')}x{canvas.get('height', '?')}.", result
+        )
     if name == "list_shaders":
         result = _send_app_command("list_shaders")
         return _text_result(f"Found {len(result.get('shaders', []))} shaders.", result)
