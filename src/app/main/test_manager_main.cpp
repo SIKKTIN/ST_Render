@@ -829,9 +829,9 @@ int main(int argc, char* argv[]) {
 
         // Canvas + Console (with splitter)
         {
-            float canvasW = std::max(100.0f, contentW - leftPanelW - createObjPanelW - rightPanelW);
+            float outputW = std::max(100.0f, contentW - leftPanelW - createObjPanelW - rightPanelW);
             ImGui::SetNextWindowPos(ImVec2(leftPanelW + createObjPanelW, menuBarH));
-            ImGui::SetNextWindowSize(ImVec2(canvasW, contentH));
+            ImGui::SetNextWindowSize(ImVec2(outputW, contentH));
             ImGui::Begin("Output", nullptr,
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoCollapse);
@@ -851,7 +851,24 @@ int main(int argc, char* argv[]) {
 
                 float thisCanvasH = availH - consoleHeight;
 
-                ImGui::Image((void*)(intptr_t)canvas, ImVec2(canvasW, thisCanvasH));
+                // The software render target is deliberately fixed at 640x480
+                // (4:3). Fit it inside the resizable Output panel without
+                // stretching the model when side panels are dragged.
+                const float renderAspect = static_cast<float>(Layout::CANVAS_W) /
+                                           static_cast<float>(Layout::CANVAS_H);
+                const float availableW = ImGui::GetContentRegionAvail().x;
+                float imageW = availableW;
+                float imageH = imageW / renderAspect;
+                if (imageH > thisCanvasH) {
+                    imageH = thisCanvasH;
+                    imageW = imageH * renderAspect;
+                }
+                const float padX = std::max(0.0f, (availableW - imageW) * 0.5f);
+                const float padY = std::max(0.0f, (thisCanvasH - imageH) * 0.5f);
+                ImGui::Dummy(ImVec2(0.0f, padY));
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + padX);
+                ImGui::Image((void*)(intptr_t)canvas, ImVec2(imageW, imageH));
+                ImGui::Dummy(ImVec2(0.0f, padY));
 
                 // Record canvas screen bounds for event routing
                 ImVec2 cMin = ImGui::GetItemRectMin();
@@ -862,7 +879,7 @@ int main(int argc, char* argv[]) {
                 canvasMaxY = (int)cMax.y;
                 if (auto* m = selectedLeaf()) {
                     m->renderUIOverlay(
-                        canvasMinX, canvasMinY, (int)canvasW, (int)thisCanvasH);
+                        canvasMinX, canvasMinY, (int)imageW, (int)imageH);
                 }
 
                 ImGui::Button("##Splitter", ImVec2(-1, splitterH));
