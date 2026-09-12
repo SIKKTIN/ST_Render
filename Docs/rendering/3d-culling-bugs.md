@@ -344,3 +344,13 @@ if (visibilityDot <= 0.0f) continue;
 - **顶点级 frustum culling 反模式**：要求"3 顶点全在视锥内才保留"——会把跨越视锥边界的可见三角形误剔。这是过去 Bug B 的根因。
 - **Trivial-reject frustum culling 是反模式的修正版**：要求"3 顶点全在视锥外才剔"——只剔绝对不可见的，不误剔可见三角形。**且这是性能优化的合理手段**：对贴脸 / 进入 mesh 内部这种三角形 `w` 翻转 / 跨越 near plane 的情况，能跳过大量 rasterize 调用。
 - 写 culling 时**先彻底关闭它**验证物体本身能渲染，再"加一层看是否还能渲染"，可以快速二分定位。
+
+## 当前实现补充（2026-09）
+
+`TestModule_3DRender::drawMesh()` 现在不再使用“至少一个顶点必须在视锥内”的
+trivial-reject。该判断会误删“3 个顶点都在视锥外、但三角形穿过视锥”的内视几何。
+顶点经过背面剔除后，统一调用 `clipTriangleAgainstFrustum()` 对六个裁剪平面做
+Sutherland-Hodgman 裁剪，再将结果多边形三角化后交给 Rasterizer。
+
+由于 3D Demo 支持飞入 unit cube 内部，近裁面从 `0.1` 调整为 `0.001`，避免贴近
+内壁时整面被近裁面裁掉。离线工具 `ST_Render_Dump` 使用同样的裁剪和投影参数。

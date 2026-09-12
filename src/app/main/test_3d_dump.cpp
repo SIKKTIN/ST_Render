@@ -122,19 +122,6 @@ static void drawMeshLike(ST::FrameBuffer& fb, ST::DepthBuffer& db,
         ST::VertexOut v1 = vs.process(verts[idx[i + 1]]);
         ST::VertexOut v2 = vs.process(verts[idx[i + 2]]);
 
-        bool triviallyOutside = true;
-        for (const ST::VertexOut* p : {&v0, &v1, &v2}) {
-            float w = p->position.w;
-            if (w <= 0.0f) continue;
-            if (p->position.x > -w && p->position.x < w &&
-                p->position.y > -w && p->position.y < w &&
-                p->position.z > -w && p->position.z < w) {
-                triviallyOutside = false;
-                break;
-            }
-        }
-        if (triviallyOutside) continue;
-
         ST::Vector3 faceNormal = (v1.worldPosition - v0.worldPosition)
                                     .cross(v2.worldPosition - v0.worldPosition);
         ST::Vector3 toEye = eye - v0.worldPosition;
@@ -143,13 +130,10 @@ static void drawMeshLike(ST::FrameBuffer& fb, ST::DepthBuffer& db,
         if (vis <= 0.0f) continue;
 
         auto frag = [](const ST::VertexOut& f) { return f.color; };
-        ST::VertexOut emitBuf[4]; int emitN = 0;
-        ST::clipTriangleAgainstNearPlane(v0, v1, v2, emitBuf, emitN);
-        if (emitN == 3) {
-            rz.rasterizeTriangle(emitBuf[0], emitBuf[1], emitBuf[2], frag);
-        } else if (emitN == 4) {
-            rz.rasterizeTriangle(emitBuf[0], emitBuf[1], emitBuf[2], frag);
-            rz.rasterizeTriangle(emitBuf[0], emitBuf[2], emitBuf[3], frag);
+        ST::VertexOut emitBuf[16]; int emitN = 0;
+        ST::clipTriangleAgainstFrustum(v0, v1, v2, emitBuf, emitN);
+        for (int k = 1; k + 1 < emitN; ++k) {
+            rz.rasterizeTriangle(emitBuf[0], emitBuf[k], emitBuf[k + 1], frag);
         }
     }
 }
@@ -173,7 +157,7 @@ static void renderOne(ST::FrameBuffer& fb, ST::DepthBuffer& db,
     ST::Matrix4x4 view = ST::Matrix4x4::lookAt(eye, target, up);
     float aspect = (float)W / (float)H;
     ST::Matrix4x4 proj = ST::Matrix4x4::perspective(
-        (float)M_PI / 3.0f, aspect, 0.1f, 100.0f);
+        (float)M_PI / 3.0f, aspect, 0.001f, 100.0f);
 
     ST::Uniform uni;
     uni.modelMatrix = ST::Matrix4x4::identity();
@@ -317,7 +301,7 @@ int main(int argc, char** argv) {
             ST::Vector3 forward(-cp * std::sin(yaw), -sp, -cp * std::cos(yaw));
             ST::Vector3 target = eye + forward;
             ST::Matrix4x4 view = ST::Matrix4x4::lookAt(eye, target, ST::Vector3(0, 1, 0));
-            ST::Matrix4x4 proj = ST::Matrix4x4::perspective((float)M_PI/3.0f, (float)W/H, 0.1f, 100.0f);
+            ST::Matrix4x4 proj = ST::Matrix4x4::perspective((float)M_PI/3.0f, (float)W/H, 0.001f, 100.0f);
 
             ST::Uniform uni;
             uni.modelMatrix = ST::Matrix4x4::identity();
@@ -343,9 +327,9 @@ int main(int argc, char** argv) {
             float vis = fn.dot(toEye);
             if (inside) vis = -vis;
 
-            // Near-plane clip
-            ST::VertexOut emitBuf[4]; int emitN = 0;
-            ST::clipTriangleAgainstNearPlane(v0, v1, v2, emitBuf, emitN);
+            // Full clip-space clip
+            ST::VertexOut emitBuf[16]; int emitN = 0;
+            ST::clipTriangleAgainstFrustum(v0, v1, v2, emitBuf, emitN);
             char tag = (emitN == 0 ? 'X' : (emitN == 3 ? 'K' : 'Q'));
             if (j == 0) {
                 std::printf("[w0=%.3f w1=%.3f w2=%.3f]",

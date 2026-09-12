@@ -38,11 +38,26 @@ TestModule_3DRender::TestModule_3DRender()
     , m_lastCanvasY(0)
     , m_canvasW(640)
     , m_canvasH(480)
+    , m_material(ST::Material::defaultMaterial())
+    , m_light(ST::Light::directional(ST::Vector3(-0.4f, -1.0f, -0.6f), ST::Color::white(), 1.4f))
+    , m_ambientLight(0.12f, 0.12f, 0.12f)
+    , m_lightingEnabled(true)
 {
     m_cube = ST::Mesh::createCube(1.0f); // unit cube, edge length 1, centered at origin
+    m_builtinShader = std::make_shared<ST::BuiltinShaderProgram>(m_vertexShader, m_fragmentShader);
+    m_activeShader = m_builtinShader;
+    scanShaderCatalog();
+    if (m_selectedShaderIndex >= 0) loadSelectedShader();
 }
 
 TestModule_3DRender::~TestModule_3DRender() {
+    if (m_outputTexture) {
+        SDL_DestroyTexture(m_outputTexture);
+        m_outputTexture = nullptr;
+    }
+    m_sdlRenderer = nullptr;
+    m_outputTextureW = 0;
+    m_outputTextureH = 0;
     delete m_frameBuffer;
     delete m_depthBuffer;
 }
@@ -57,6 +72,73 @@ void TestModule_3DRender::rebuildBuffers(int canvasW, int canvasH) {
     m_rasterizer.setBuffers(m_frameBuffer, m_depthBuffer);
 }
 
+void TestModule_3DRender::scanShaderCatalog() {
+    const std::string previousPath =
+        (m_selectedShaderIndex >= 0 &&
+         m_selectedShaderIndex < static_cast<int>(m_shaderCatalog.getEntries().size()))
+            ? m_shaderCatalog.getEntries()[m_selectedShaderIndex].relativePath
+            : std::string();
+
+    std::string error;
+    if (!m_shaderCatalog.scan(m_shaderRoot, error)) {
+        // When launched from a build/bin directory, the source tree is two
+        // levels above the executable. The deployed copy remains the first
+        // choice, so this fallback is only for development runs.
+        const std::string fallback = "../../Data/Shaders";
+        if (!m_shaderCatalog.scan(fallback, error)) {
+            m_selectedShaderIndex = -1;
+            m_shaderError = error;
+            return;
+        }
+        m_shaderRoot = fallback;
+    }
+
+    m_selectedShaderIndex = m_shaderCatalog.findByRelativePath(previousPath);
+    if (m_selectedShaderIndex < 0 && !m_shaderCatalog.getEntries().empty()) {
+        m_selectedShaderIndex = 0;
+    }
+    m_shaderError.clear();
+}
+
+void TestModule_3DRender::loadSelectedShader() {
+    const auto& entries = m_shaderCatalog.getEntries();
+    if (m_selectedShaderIndex < 0 || m_selectedShaderIndex >= static_cast<int>(entries.size())) {
+        m_shaderManager.clear();
+        m_activeShader = m_builtinShader;
+        return;
+    }
+
+    std::string error;
+    if (m_shaderManager.load(entries[m_selectedShaderIndex].absolutePath, error)) {
+        m_activeShader = m_shaderManager.getProgram();
+        m_shaderError.clear();
+    } else {
+        // Keep the previous valid program active when the selected script is
+        // invalid. This also makes switching back to the built-in path safe.
+        m_shaderError = error;
+    }
+}
+
+bool TestModule_3DRender::selectShaderIndex(int index) {
+    if (index < 0 || index >= static_cast<int>(m_shaderCatalog.getEntries().size())) return false;
+    m_selectedShaderIndex = index;
+    loadSelectedShader();
+    needsRerender = true;
+    return m_shaderError.empty();
+}
+
+void TestModule_3DRender::pollShaderReload() {
+    if (!m_shaderManager.hasSourceFile()) return;
+    std::string error;
+    if (m_shaderManager.reloadIfChanged(error)) {
+        m_activeShader = m_shaderManager.getProgram();
+        m_shaderError.clear();
+        needsRerender = true;
+    } else if (!error.empty()) {
+        m_shaderError = error;
+    }
+}
+
 void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
                                    const ST::Matrix4x4& model,
                                    const ST::Matrix4x4& view,
@@ -64,9 +146,18 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
 {
     ST::Uniform u;
     u.modelMatrix = model;
+    u.normalMatrix = model.inverse().transpose();
     u.viewMatrix = view;
     u.projectionMatrix = projection;
     m_vertexShader.setUniform(u);
+
+    ST::ShaderContext shaderContext;
+    shaderContext.uniforms = u;
+    shaderContext.viewPosition = m_eye;
+    shaderContext.sampleTexture = [this](const ST::Vector2& uv) {
+        return m_fragmentShader.sampleTexture(uv);
+    };
+    const auto shader = m_activeShader ? m_activeShader : m_builtinShader;
 
     const auto& verts = mesh.getVertices();
     const auto& idx = mesh.getIndices();
@@ -88,37 +179,9 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     bool cameraInside = cameraToCenter.length() < boundingRadius;
 
     for (int i = 0; i + 2 < (int)idx.size(); i += 3) {
-        ST::VertexOut v0 = m_vertexShader.process(verts[idx[i + 0]]);
-        ST::VertexOut v1 = m_vertexShader.process(verts[idx[i + 1]]);
-        ST::VertexOut v2 = m_vertexShader.process(verts[idx[i + 2]]);
-
-        // ---- Trivial frustum reject ----
-        // A triangle is "trivially outside" -- and can be dropped without
-        // further work -- only when we can prove that every part of it lies
-        // outside the clip-space box {-w, w}^3 on at least one axis. After
-        // the Sutherland-Hodgman clipper below, "behind the eye" triangles
-        // (all three vertices w <= 0) produce 0 sub-triangles and cost
-        // nothing per pixel, but running them through the clipper still
-        // does some math; this cheap pre-check skips that work.
-        //
-        // The "w <= 0 -> behind eye" treatment that used to be here was
-        // removed: it's no longer needed because the clipper correctly
-        // discards fully-outside triangles in the "behind eye" half-space.
-        bool triviallyOutside = true;
-        for (const ST::VertexOut* vs : {&v0, &v1, &v2}) {
-            float w = vs->position.w;
-            // A vertex with w <= 0 may still be part of a straddling
-            // triangle that crosses the near plane -- keep checking the
-            // other vertices before declaring it trivially outside.
-            if (w <= 0.0f) continue;
-            if (vs->position.x > -w && vs->position.x < w &&
-                vs->position.y > -w && vs->position.y < w &&
-                vs->position.z > -w && vs->position.z < w) {
-                triviallyOutside = false;
-                break;
-            }
-        }
-        if (triviallyOutside) continue;
+        ST::VertexOut v0 = shader->vertex(verts[idx[i + 0]], shaderContext);
+        ST::VertexOut v1 = shader->vertex(verts[idx[i + 1]], shaderContext);
+        ST::VertexOut v2 = shader->vertex(verts[idx[i + 2]], shaderContext);
 
         // ---- Back-face culling, inside-aware ----
         // The outward face normal is (v1 - v0) x (v2 - v0) in world space.
@@ -131,49 +194,47 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
         // convex mesh without doubling the triangle count.
         ST::Vector3 faceNormal = (v1.worldPosition - v0.worldPosition)
                                     .cross(v2.worldPosition - v0.worldPosition);
+        if (faceNormal.lengthSquared() <= 1e-12f) continue;
+        faceNormal = faceNormal.normalized();
         ST::Vector3 toEye = m_eye - v0.worldPosition;
         float visibilityDot = faceNormal.dot(toEye);
         if (cameraInside) visibilityDot = -visibilityDot;
         if (visibilityDot <= 0.0f) continue;
 
-        // ---- Near-plane clipping (Sutherland-Hodgman) ----
-        // Triangles whose vertices straddle the near plane (some w <= 0,
-        // some w > 0) used to be passed straight to rasterizeTriangle, where
-        // their partly-negative-w screen coordinates caused two failure
-        // modes:
-        //   (a) the triangle's bounding box clamped to the whole viewport,
-        //       so the rasterizer scanned nearly every pixel of an
-        //       essentially degenerate shape and the user saw "the whole
-        //       cube replaced with a coloured rectangle",
-        //   (b) barycentric / depth interpolation broke because 1/w is
-        //       invalid for negative w, leaving stray pixels around the
-        //       edges of the cube at certain yaw values -- which felt like
-        //       "WASD got inverted".
-        // Sutherland-Hodgman clip against w = 0 splits the triangle into
-        // 1 or 2 sub-triangles that all have w > 0, so the rasterizer
-        // sees a sane shape on every frame. The new vertices are linearly
-        // interpolated along the original edges, which is correct enough
-        // for the current flat-colored fragment shader.
+        // ---- Complete clip-space clipping (Sutherland-Hodgman) ----
+        // Do not require any original vertex to be inside the frustum: a
+        // triangle can intersect the visible volume with all three vertices
+        // outside it (the common case when the camera is inside a cube).
+        // Clipping against all six planes handles that case and keeps every
+        // rasterized vertex inside the valid perspective-divide domain.
         auto dispatchOne = [&](const ST::VertexOut& a,
                               const ST::VertexOut& b,
                               const ST::VertexOut& c) {
-            auto frag = [](const ST::VertexOut& f) {
-                return f.color;
+            auto frag = [this, shader, &shaderContext, faceNormal, cameraInside](const ST::VertexOut& f) {
+                if (shader != m_builtinShader) return shader->fragment(f, shaderContext);
+                if (!m_lightingEnabled) return f.color;
+
+                // createCube() shares its eight corners, so vertex normals
+                // cannot represent hard cube edges. Use the geometric face
+                // normal for this demo and flip it for an interior view so
+                // inner walls receive light from sources inside the cube.
+                ST::VertexOut lit = f;
+                lit.normal = cameraInside ? -faceNormal : faceNormal;
+                return shader->fragment(lit, shaderContext);
             };
             m_rasterizer.rasterizeTriangle(a, b, c, frag);
         };
 
-        ST::VertexOut emitBuf[4];
+        ST::VertexOut emitBuf[16];
         int emitCount = 0;
-        ST::clipTriangleAgainstNearPlane(v0, v1, v2, emitBuf, emitCount);
+        ST::clipTriangleAgainstFrustum(v0, v1, v2, emitBuf, emitCount);
         if (emitCount < 3) {
-            // Triangle fully outside the near plane -- nothing to draw.
-        } else if (emitCount == 3) {
-            dispatchOne(emitBuf[0], emitBuf[1], emitBuf[2]);
-        } else if (emitCount == 4) {
-            // Quad -- split into 2 triangles in fan order (0,1,2) and (0,2,3).
-            dispatchOne(emitBuf[0], emitBuf[1], emitBuf[2]);
-            dispatchOne(emitBuf[0], emitBuf[2], emitBuf[3]);
+            // Triangle fully outside the clip volume -- nothing to draw.
+        } else {
+            // Convex clipped polygon: triangulate as a fan.
+            for (int k = 1; k + 1 < emitCount; ++k) {
+                dispatchOne(emitBuf[0], emitBuf[k], emitBuf[k + 1]);
+            }
         }
     }
 }
@@ -247,14 +308,26 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     ST::Matrix4x4 view = ST::Matrix4x4::lookAt(eye, target, up);
 
     float aspect = static_cast<float>(canvasW) / static_cast<float>(canvasH);
+    // The demo deliberately supports flying inside the unit cube.  A 0.1
+    // near plane would clip away a wall as soon as the camera gets within
+    // ten centimetres of it, so use a smaller near distance for the editor
+    // preview while retaining the complete clip-space clipping step above.
     ST::Matrix4x4 projection = ST::Matrix4x4::perspective(
         static_cast<float>(M_PI) / 3.0f, // 60 degrees vertical FOV
         aspect,
-        0.1f,
+        0.001f,
         100.0f
     );
 
     ST::Matrix4x4 model = ST::Matrix4x4::identity();
+
+    m_fragmentShader.setViewPosition(eye);
+    m_fragmentShader.setMaterial(m_material);
+    m_fragmentShader.setAmbient(m_ambientLight);
+    m_fragmentShader.clearLights();
+    if (m_lightingEnabled) m_fragmentShader.addLight(m_light);
+
+    pollShaderReload();
 
     m_rasterizer.setUseRawScreenCoords(false);
     drawMesh(m_cube, model, view, projection);
@@ -268,38 +341,132 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
         rgba32[i] = packRGBA(pixels[i]);
     }
 
-    SDL_Texture* tex = SDL_CreateTexture(renderer,
-        SDL_PIXELFORMAT_RGBA32,
-        SDL_TEXTUREACCESS_STREAMING,
-        canvasW, canvasH);
-    SDL_UpdateTexture(tex, nullptr, rgba32.data(), canvasW * sizeof(uint32_t));
-    SDL_RenderCopy(renderer, tex, nullptr, nullptr);
-    SDL_DestroyTexture(tex);
+    // Reuse one streaming texture instead of allocating and destroying an SDL
+    // texture every frame. The old per-frame allocation caused unnecessary
+    // driver/heap churn and could eventually surface as heap corruption.
+    if (m_sdlRenderer != renderer || !m_outputTexture ||
+        m_outputTextureW != canvasW || m_outputTextureH != canvasH) {
+        if (m_outputTexture) SDL_DestroyTexture(m_outputTexture);
+        m_sdlRenderer = renderer;
+        m_outputTexture = SDL_CreateTexture(renderer,
+            SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STREAMING,
+            canvasW, canvasH);
+        m_outputTextureW = canvasW;
+        m_outputTextureH = canvasH;
+    }
+    if (!m_outputTexture) return;
+
+    SDL_UpdateTexture(m_outputTexture, nullptr, rgba32.data(), canvasW * sizeof(uint32_t));
+    SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
 }
 
 bool TestModule_3DRender::renderControls() {
+    bool changed = false;
     ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Camera (Fly, UE-style)");
     ImGui::Separator();
 
-    ImGui::SliderFloat("Yaw",   &m_yaw,   -6.28f, 6.28f);
-    ImGui::SliderFloat("Pitch", &m_pitch, -1.5f,  1.5f);
+    changed |= ImGui::SliderFloat("Yaw",   &m_yaw,   -6.28f, 6.28f);
+    changed |= ImGui::SliderFloat("Pitch", &m_pitch, -1.5f,  1.5f);
 
-    ImGui::DragFloat3("Eye", &m_eye.x, 0.05f);
+    changed |= ImGui::DragFloat3("Eye", &m_eye.x, 0.05f);
 
-    ImGui::SliderFloat("Speed",      &m_moveSpeed, m_moveSpeedMin, m_moveSpeedMax, "%.2f u/s");
+    changed |= ImGui::SliderFloat("Speed",      &m_moveSpeed, m_moveSpeedMin, m_moveSpeedMax, "%.2f u/s");
     if (ImGui::Button("Reset Camera")) {
         m_eye    = ST::Vector3(1.6f, 1.0f, 2.5f);
         m_yaw    = 0.6f;
         m_pitch  = 0.35f;
         m_moveSpeed = 2.5f;
+        changed = true;
     }
-    needsRerender = true;
 
     ImGui::Separator();
     ImGui::BulletText("LMB drag in canvas to look.");
     ImGui::BulletText("RMB drag also looks; hold RMB + WASD/QE to fly.");
     ImGui::BulletText("Shift = sprint, Wheel = change speed.");
-    return true;
+
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Lighting (Blinn-Phong)");
+    ImGui::Separator();
+    changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
+    changed |= ImGui::ColorEdit3("Light color", &m_light.color.r);
+    changed |= ImGui::DragFloat3("Light direction", &m_light.direction.x, 0.02f, -1.0f, 1.0f);
+    if (m_light.direction.lengthSquared() < 1e-8f) {
+        m_light.direction = ST::Vector3(0.0f, -1.0f, 0.0f);
+    } else {
+        m_light.direction.normalize();
+    }
+    changed |= ImGui::SliderFloat("Light intensity", &m_light.intensity, 0.0f, 5.0f);
+    changed |= ImGui::ColorEdit3("Material diffuse", &m_material.diffuse.x);
+    changed |= ImGui::ColorEdit3("Material specular", &m_material.specular.x);
+    changed |= ImGui::SliderFloat("Shininess", &m_material.shininess, 1.0f, 256.0f);
+    changed |= ImGui::ColorEdit3("Ambient", &m_ambientLight.x);
+
+    changed |= renderShaderControls();
+    if (changed) needsRerender = true;
+    return changed;
+}
+
+bool TestModule_3DRender::renderShaderControls() {
+    bool changed = false;
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Shader");
+    ImGui::Separator();
+
+    const auto& entries = m_shaderCatalog.getEntries();
+    if (entries.empty()) {
+        ImGui::TextDisabled("No .stshader files found in %s", m_shaderRoot.c_str());
+    } else {
+        const char* preview = (m_selectedShaderIndex >= 0 &&
+                               m_selectedShaderIndex < static_cast<int>(entries.size()))
+            ? entries[m_selectedShaderIndex].displayName.c_str()
+            : "Built-in shader";
+        if (ImGui::BeginCombo("Current shader", preview)) {
+            for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
+                const bool selected = i == m_selectedShaderIndex;
+                if (ImGui::Selectable(entries[i].displayName.c_str(), selected)) {
+                    m_selectedShaderIndex = i;
+                    loadSelectedShader();
+                    needsRerender = true;
+                    changed = true;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("%s", entries[i].relativePath.c_str());
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        if (m_selectedShaderIndex >= 0 &&
+            m_selectedShaderIndex < static_cast<int>(entries.size())) {
+            ImGui::TextDisabled("%s", entries[m_selectedShaderIndex].relativePath.c_str());
+        }
+    }
+
+    if (ImGui::Button("Refresh shader list")) {
+        scanShaderCatalog();
+        if (m_selectedShaderIndex >= 0) loadSelectedShader();
+        changed = true;
+        needsRerender = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload current shader")) {
+        loadSelectedShader();
+        changed = true;
+        needsRerender = true;
+    }
+
+    if (m_activeShader == m_builtinShader) {
+        ImGui::TextDisabled("Active: built-in Blinn-Phong shader");
+    } else if (m_shaderError.empty()) {
+        ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.45f, 1.0f), "Active: script shader");
+    }
+    if (!m_shaderError.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Shader error");
+        ImGui::TextWrapped("%s", m_shaderError.c_str());
+    }
+    return changed;
 }
 
 void TestModule_3DRender::onMouseDown(int button, int x, int y) {

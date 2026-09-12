@@ -72,11 +72,7 @@ void TextureManager::scanResourceFolder() {
     } while (FindNextFileA(hFind, &findData));
     FindClose(hFind);
 
-    char buf[256];
-    //snprintf(buf, sizeof(buf), "[TextureManager] Done. Found %d files, loaded %d textures\n", foundFiles, loadedTextures);
-    
     std::cout << "[TextureManager] Done. Found " << foundFiles << " files, loaded " << loadedTextures << "\n";
-    OutputDebugStringA(buf);
 }
 
 const std::string& TextureManager::getTextureName(int idx) const {

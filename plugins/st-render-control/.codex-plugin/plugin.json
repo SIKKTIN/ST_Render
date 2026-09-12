@@ -1,0 +1,22 @@
+{
+  "name": "st-render-control",
+  "version": "0.1.0",
+  "description": "St Render Control plugin",
+  "author": {
+    "name": "ST Render"
+  },
+  "interface": {
+    "displayName": "ST Render Control",
+    "shortDescription": "Control and inspect the local ST Render application.",
+    "longDescription": "Launch ST Render, switch modules, rerender, inspect console output, capture the canvas, and run offline diagnostics.",
+    "developerName": "ST Render",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Launch ST Render and list its modules.",
+      "Capture the current ST Render canvas.",
+      "Run the offline render diagnostic."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

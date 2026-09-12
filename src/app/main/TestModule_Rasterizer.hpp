@@ -11,6 +11,7 @@ public:
     ~TestModule_Rasterizer();
 
     const char* getName() const override { return "Rasterizer Test"; }
+    const char* getCategory() const override { return "TestComponent"; }
 
     void render(void* canvasTexture, int canvasW, int canvasH) override;
     bool renderControls() override;

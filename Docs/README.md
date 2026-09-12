@@ -11,7 +11,6 @@
 ## 架构
 
 - [architecture/ST_Render架构.md](./architecture/ST_Render架构.md)
-- [architecture/Scene2D架构.md](./architecture/Scene2D架构.md)
 - [architecture/TextureManager架构.md](./architecture/TextureManager架构.md)
 
 ## 推荐路径

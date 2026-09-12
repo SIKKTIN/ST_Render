@@ -18,6 +18,7 @@ namespace ST {
         m_depthBuffer.initialize(width, height);
         m_rasterizer.setBuffers(&m_frameBuffer, &m_depthBuffer);
         setupUniforms();
+        resetShaderProgram();
     }
 
     Renderer::~Renderer() = default;
@@ -31,15 +32,22 @@ namespace ST {
     void Renderer::render(const Mesh& mesh) {
         const auto& vertices = mesh.getVertices();
         const auto& indices = mesh.getIndices();
+        ShaderContext shaderContext;
+        shaderContext.uniforms = m_vertexShader.uniforms;
+        shaderContext.viewPosition = m_fragmentShader.getViewPosition();
+        shaderContext.parameters = m_shaderParameters;
+        shaderContext.sampleTexture = [this](const Vector2& uv) {
+            return m_fragmentShader.sampleTexture(uv);
+        };
 
         for (size_t i = 0; i + 2 < indices.size(); i += 3) {
             int i0 = indices[i];
             int i1 = indices[i + 1];
             int i2 = indices[i + 2];
 
-            VertexOut v0 = m_vertexShader.process(vertices[i0]);
-            VertexOut v1 = m_vertexShader.process(vertices[i1]);
-            VertexOut v2 = m_vertexShader.process(vertices[i2]);
+            VertexOut v0 = m_shaderProgram->vertex(vertices[i0], shaderContext);
+            VertexOut v1 = m_shaderProgram->vertex(vertices[i1], shaderContext);
+            VertexOut v2 = m_shaderProgram->vertex(vertices[i2], shaderContext);
 
             VertexOut clipped[16];
             int clippedCount = 0;
@@ -64,8 +72,8 @@ namespace ST {
                 }
 
                 m_rasterizer.rasterizeTriangle(a, b, c,
-                    [this](const VertexOut& vo) {
-                        return m_fragmentShader.shade(vo);
+                    [this, &shaderContext](const VertexOut& vo) {
+                        return m_shaderProgram->fragment(vo, shaderContext);
                     });
             }
         }
@@ -103,6 +111,34 @@ namespace ST {
 
     void Renderer::setViewMatrix(const Matrix4x4& mat) {
         m_vertexShader.uniforms.viewMatrix = mat;
+    }
+
+    void Renderer::setShaderProgram(std::shared_ptr<IShaderProgram> program) {
+        if (program) {
+            m_shaderManager.clear();
+            m_shaderProgram = std::move(program);
+        } else {
+            resetShaderProgram();
+        }
+    }
+
+    void Renderer::resetShaderProgram() {
+        m_shaderManager.clear();
+        m_shaderProgram = std::make_shared<BuiltinShaderProgram>(m_vertexShader,
+                                                                   m_fragmentShader);
+    }
+
+    bool Renderer::loadShaderFile(const std::string& path, std::string& error) {
+        if (!m_shaderManager.load(path, error)) return false;
+        m_shaderProgram = m_shaderManager.getProgram();
+        return true;
+    }
+
+    bool Renderer::reloadShaderIfChanged(std::string& error) {
+        if (!m_shaderManager.hasSourceFile()) return false;
+        if (!m_shaderManager.reloadIfChanged(error)) return false;
+        m_shaderProgram = m_shaderManager.getProgram();
+        return true;
     }
 
     void Renderer::setupUniforms() {

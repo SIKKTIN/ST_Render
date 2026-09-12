@@ -108,6 +108,22 @@ public:
         return (attr0 * factor0 + attr1 * factor1 + attr2 * factor2) * invSum;
     }
 
+    static Vector4 interpolateVarying(const Vector3& bary,
+        const VertexOut& v0, const VertexOut& v1, const VertexOut& v2,
+        size_t index, float w0, float w1, float w2) {
+        VaryingInterpolation mode = v0.varyingInterpolation[index];
+        if (mode == VaryingInterpolation::Flat) {
+            return v0.varyings[index];
+        }
+        if (mode == VaryingInterpolation::NoPerspective) {
+            return linearInterpolate<Vector4>(bary,
+                v0.varyings[index], v1.varyings[index], v2.varyings[index]);
+        }
+        return perspectiveCorrect<Vector4>(bary,
+            v0.varyings[index], v1.varyings[index], v2.varyings[index],
+            w0, w1, w2);
+    }
+
     void rasterizeTriangle(const VertexOut& v0, const VertexOut& v1, const VertexOut& v2,
         std::function<Color(const VertexOut&)> fragmentShader) {
         if (!m_frameBuffer) return;
@@ -147,6 +163,12 @@ public:
                         frag.worldPosition = perspectiveCorrect<Vector3>(bary, v0.worldPosition, v1.worldPosition, v2.worldPosition, w0, w1, w2);
                         frag.normal = perspectiveCorrect<Vector3>(bary, v0.normal, v1.normal, v2.normal, w0, w1, w2).normalized();
                         frag.texCoord = perspectiveCorrect<Vector2>(bary, v0.texCoord, v1.texCoord, v2.texCoord, w0, w1, w2);
+						frag.varyingCount = std::max({ v0.varyingCount, v1.varyingCount, v2.varyingCount });
+						for (size_t varying = 0; varying < static_cast<size_t>(frag.varyingCount); ++varying) {
+							frag.varyings[varying] = interpolateVarying(
+								bary, v0, v1, v2, varying, w0, w1, w2);
+							frag.varyingInterpolation[varying] = v0.varyingInterpolation[varying];
+						}
 
                         Color finalColor = fragmentShader(frag);
                         m_frameBuffer->setPixel(x, y, finalColor);

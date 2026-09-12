@@ -27,6 +27,7 @@ public:
     ~TestModule_Texture();
 
     const char* getName() const override { return "Texture Test"; }
+    const char* getCategory() const override { return "TestComponent"; }
     bool needsRealTimeUpdate() const override { return true; }
 
     void onMouseMove(int x, int y) override;

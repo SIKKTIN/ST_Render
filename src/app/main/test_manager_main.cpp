@@ -2,26 +2,24 @@
 #include <SDL2/SDL.h>
 #include <iostream>
 #include <vector>
+#include <deque>
 #include <cstring>
+#include <cctype>
+#include <filesystem>
+#include <stdexcept>
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
+#include "AppControlBridge.hpp"
 #include "app/module/IModule.hpp"
-#include "TestModule_Circle.hpp"
-#include "TestModule_Rectangle.hpp"
 #include "TestModule_FrameBuffer.hpp"
 #include "TestModule_Rasterizer.hpp"
 #include "TestModule_3DRender.hpp"
 #include "TestModule_Texture.hpp"
-#include "TestModule_Music.hpp"
-#include "TestModule_DragWindow.hpp"
-#include "TestModule_NetworkTest.hpp"
+#include "TestModule_Shader.hpp"
 #include "app/module/review/TestModule_ReviewMath.hpp"
-#include "app/module/review/TestModule_ReviewBeta.hpp"
-#include "app/module/review/TestModule_ReviewGamma.hpp"
-#include "app/module/review/TestModule_ReviewDelta.hpp"
+#include "app/module/review/TestModule_ReviewRasterizer.hpp"
 #include "engine/editor/TextureManager.hpp"
-#include "engine/editor/AudioManager.hpp"
 
 // ---------------------------------------------------------------------------
 // Layout constants (window size, panel widths, canvas size).
@@ -50,13 +48,12 @@ int main(int argc, char* argv[]) {
 
     enum class Theme { Dark, Light };
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << std::endl;
         return 1;
     }
 
     ST::TextureManager::getInstance().scanResourceFolder();
-    ST::AudioManager::getInstance().scanAudioFolder();
 
     SDL_Window* window = SDL_CreateWindow(
         "ST Render - Test Manager",
@@ -72,6 +69,11 @@ int main(int argc, char* argv[]) {
     }
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer) {
+        // Rendering work is CPU-side, so use SDL's software backend as a
+        // compatibility fallback when the accelerated driver is unavailable.
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
     if (!renderer) {
         std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << std::endl;
         SDL_DestroyWindow(window);
@@ -96,6 +98,7 @@ int main(int argc, char* argv[]) {
     };
     struct ModuleGroup {
         std::vector<IModule*> children;
+        const char* category = "";
         const char* label = "";
     };
     struct ModuleEntry {
@@ -113,24 +116,20 @@ int main(int argc, char* argv[]) {
         new TestModule_FrameBuffer(),
         new TestModule_Rasterizer(),
         new TestModule_3DRender(),
-        new TestModule_DragWindow(),
         new TestModule_Texture(),
-        new TestModule_Music(),
-        new TestModule_NetworkTest(),
-        new TestModule_Circle(),
-        new TestModule_Rectangle(),
+        new TestModule_Shader(),
         new TestModule_ReviewMath(),
-        new TestModule_ReviewBeta(),
-        new TestModule_ReviewGamma(),
-        new TestModule_ReviewDelta(),
+        new TestModule_ReviewRasterizer(),
     };
 
-    // 2) Aggregate by category.  `groups` keeps stable addresses for
-    //    each category so we can point entries.parent at them.
-    std::vector<ModuleGroup> groups;
+    // 2) Aggregate by category.  A deque keeps group addresses stable while
+    // new categories are appended, so entries.parent remains valid.
+    std::deque<ModuleGroup> groups;
     auto findOrCreateGroup = [&](const char* cat) -> ModuleGroup* {
-        for (auto& g : groups) if (std::strcmp(g.label, cat) == 0) return &g;
-        groups.push_back(ModuleGroup{ {}, cat });
+        for (auto& g : groups) if (std::strcmp(g.category, cat) == 0) return &g;
+        const char* displayName = std::strcmp(cat, "TestComponent") == 0
+            ? "Test Components" : cat;
+        groups.push_back(ModuleGroup{ {}, cat, displayName });
         return &groups.back();
     };
 
@@ -154,15 +153,30 @@ int main(int argc, char* argv[]) {
         if (!e.isGroup && e.parent == nullptr) ordered.push_back(e);
     }
     for (auto& g : groups) {
-        ordered.push_back({ g.label, true, {}, { g.children, g.label }, nullptr });
+        ordered.push_back({ g.label, true, {}, { g.children, g.category, g.label }, nullptr });
         for (auto& e : entries) {
             if (e.parent == &g) ordered.push_back(e);
         }
     }
     entries = std::move(ordered);
 
-    // Default selection: first leaf module (Frame Buffer).
-    int selectedModule = 0;
+    // Default selection: open the 3D Render module when present, even though
+    // modules are grouped and their registration order may change.
+    int selectedModule = -1;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        if (!entries[i].isGroup && std::strcmp(entries[i].leaf.mod->getName(), "3D Render") == 0) {
+            selectedModule = static_cast<int>(i);
+            break;
+        }
+    }
+    if (selectedModule < 0) {
+        for (size_t i = 0; i < entries.size(); ++i) {
+            if (!entries[i].isGroup) {
+                selectedModule = static_cast<int>(i);
+                break;
+            }
+        }
+    }
     auto selectedLeaf = [&]() -> IModule* {
         if (selectedModule < 0 || selectedModule >= (int)entries.size()) return nullptr;
         if (entries[selectedModule].isGroup) return nullptr;
@@ -209,6 +223,13 @@ int main(int argc, char* argv[]) {
         SDL_TEXTUREACCESS_TARGET,
         Layout::CANVAS_W, Layout::CANVAS_H
     );
+    if (!canvas) {
+        std::cerr << "SDL_CreateTexture(canvas) failed: " << SDL_GetError() << std::endl;
+        SDL_DestroyRenderer(renderer);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
 
     auto runModule = [&](int index, bool rerender = true) {
         if (index < 0 || index >= (int)entries.size()) return;
@@ -260,6 +281,178 @@ int main(int argc, char* argv[]) {
     }
 
     bool running = true;
+
+    ST::AppControlBridge controlBridge;
+    std::string controlBridgeError;
+    if (!controlBridge.initialize(&controlBridgeError)) {
+        std::cerr << "[MCP] Control bridge disabled: " << controlBridgeError << std::endl;
+    }
+
+    auto buildControlState = [&]() {
+        ST::AppControlBridge::Json modules = ST::AppControlBridge::Json::array();
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const auto& entry = entries[i];
+            if (entry.isGroup) continue;
+            modules.push_back({
+                { "index", static_cast<int>(i) },
+                { "name", entry.label },
+                { "category", entry.parent ? entry.parent->label : "" },
+                { "selected", selectedModule == static_cast<int>(i) },
+                { "realTime", entry.leaf.mod->needsRealTimeUpdate() }
+            });
+        }
+
+        return ST::AppControlBridge::Json{
+            { "application", "ST_Render_Manager" },
+            { "running", running },
+            { "selectedModule", selectedLeaf() ? selectedLeaf()->getName() : "" },
+            { "canvas", { { "width", Layout::CANVAS_W }, { "height", Layout::CANVAS_H } } },
+            { "consoleOutput", consoleOutput },
+            { "modules", modules }
+        };
+    };
+
+    auto saveCanvasBitmap = [&](const std::filesystem::path& outputPath) {
+        SDL_Surface* surface = SDL_CreateRGBSurfaceWithFormat(
+            0, Layout::CANVAS_W, Layout::CANVAS_H, 32, SDL_PIXELFORMAT_RGBA32);
+        if (!surface) throw std::runtime_error(SDL_GetError());
+
+        SDL_Texture* previousTarget = SDL_GetRenderTarget(renderer);
+        if (SDL_SetRenderTarget(renderer, canvas) != 0) {
+            SDL_FreeSurface(surface);
+            throw std::runtime_error(SDL_GetError());
+        }
+
+        const int readResult = SDL_RenderReadPixels(
+            renderer, nullptr, SDL_PIXELFORMAT_RGBA32, surface->pixels, surface->pitch);
+        SDL_SetRenderTarget(renderer, previousTarget);
+        if (readResult != 0) {
+            const std::string message = SDL_GetError();
+            SDL_FreeSurface(surface);
+            throw std::runtime_error(message);
+        }
+
+        const int saveResult = SDL_SaveBMP(surface, outputPath.string().c_str());
+        SDL_FreeSurface(surface);
+        if (saveResult != 0) throw std::runtime_error(SDL_GetError());
+    };
+
+    auto handleControlCommand = [&](const ST::AppControlBridge::Json& request) {
+        const std::string command = request.value("command", "");
+        const auto params = request.value(
+            "params", ST::AppControlBridge::Json::object());
+
+        if (command == "list_modules" || command == "get_status") {
+            return buildControlState();
+        }
+
+        if (command == "list_shaders" || command == "select_shader") {
+            auto* selected = selectedLeaf();
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selected);
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+
+            if (command == "select_shader") {
+                int shaderIndex = -1;
+                if (params.contains("index") && params["index"].is_number_integer()) {
+                    shaderIndex = params["index"].get<int>();
+                }
+                if (shaderIndex < 0 || !render3D->selectShaderIndex(shaderIndex)) {
+                    throw std::runtime_error(render3D->getShaderError().empty()
+                        ? "Shader index was not found or failed to load"
+                        : render3D->getShaderError());
+                }
+                runModule(selectedModule);
+            }
+
+            ST::AppControlBridge::Json shaders = ST::AppControlBridge::Json::array();
+            const auto& entries = render3D->getShaderEntries();
+            for (size_t i = 0; i < entries.size(); ++i) {
+                shaders.push_back({
+                    { "index", static_cast<int>(i) },
+                    { "name", entries[i].displayName },
+                    { "path", entries[i].relativePath },
+                    { "selected", static_cast<int>(i) == render3D->getSelectedShaderIndex() }
+                });
+            }
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "selectedShader", render3D->getSelectedShaderIndex() },
+                { "error", render3D->getShaderError() },
+                { "shaders", shaders }
+            };
+        }
+
+        if (command == "select_module") {
+            int match = -1;
+            if (params.contains("index") && params["index"].is_number_integer()) {
+                const int candidate = params["index"].get<int>();
+                if (candidate >= 0 && candidate < static_cast<int>(entries.size()) &&
+                    !entries[candidate].isGroup) {
+                    match = candidate;
+                }
+            } else if (params.contains("name") && params["name"].is_string()) {
+                std::string wanted = params["name"].get<std::string>();
+                for (char& c : wanted) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                for (size_t i = 0; i < entries.size(); ++i) {
+                    if (entries[i].isGroup) continue;
+                    std::string candidate = entries[i].label;
+                    for (char& c : candidate) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    if (candidate == wanted) {
+                        match = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+
+            if (match < 0) throw std::runtime_error("Module was not found");
+            selectedModule = match;
+            runModule(selectedModule);
+            controlBridge.updateState(buildControlState(), true);
+            return buildControlState();
+        }
+
+        if (command == "rerender") {
+            runModule(selectedModule);
+            controlBridge.updateState(buildControlState(), true);
+            return buildControlState();
+        }
+
+        if (command == "get_console_output") {
+            runModule(selectedModule, false);
+            return ST::AppControlBridge::Json{
+                { "module", selectedLeaf() ? selectedLeaf()->getName() : "" },
+                { "output", consoleOutput }
+            };
+        }
+
+        if (command == "capture_canvas") {
+            runModule(selectedModule);
+            std::string requestId = request.value("id", "capture");
+            for (char& c : requestId) {
+                const unsigned char value = static_cast<unsigned char>(c);
+                if (!std::isalnum(value) && c != '-' && c != '_') c = '_';
+            }
+            const auto outputPath = controlBridge.capturesDirectory() /
+                ("canvas-" + requestId + ".bmp");
+            saveCanvasBitmap(outputPath);
+            return ST::AppControlBridge::Json{
+                { "module", selectedLeaf() ? selectedLeaf()->getName() : "" },
+                { "path", outputPath.string() },
+                { "mimeType", "image/bmp" },
+                { "width", Layout::CANVAS_W },
+                { "height", Layout::CANVAS_H }
+            };
+        }
+
+        if (command == "shutdown") {
+            running = false;
+            return ST::AppControlBridge::Json{ { "accepted", true } };
+        }
+
+        throw std::runtime_error("Unknown control command: " + command);
+    };
+
+    controlBridge.updateState(buildControlState(), true);
 
     while (running) {
         SDL_Event event;
@@ -380,16 +573,22 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        controlBridge.poll(handleControlCommand);
+        controlBridge.updateState(buildControlState());
+
         if (auto* m = selectedLeaf(); m && m->needsRealTimeUpdate()) {
             Uint64 now = SDL_GetPerformanceCounter();
             static Uint64 last = now;
             float dt = (float)(now - last) / SDL_GetPerformanceFrequency();
             last = now;
             m->update(dt);
-            SDL_SetRenderTarget(renderer, canvas);
-            m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
-            SDL_SetRenderTarget(renderer, nullptr);
-            runModule(selectedModule, false);
+            if (m->needsRerender) {
+                m->needsRerender = false;
+                SDL_SetRenderTarget(renderer, canvas);
+                m->render(renderer, Layout::CANVAS_W, Layout::CANVAS_H);
+                SDL_SetRenderTarget(renderer, nullptr);
+                runModule(selectedModule, false);
+            }
         }
 
         ImGui_ImplSDL2_NewFrame();
@@ -457,42 +656,60 @@ int main(int argc, char* argv[]) {
             ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "Test Manager");
             ImGui::Separator();
 
-            // Render only top-level entries (parent == nullptr). Sub-modules of a
-            // group live inside the group's TreeNode and are never shown
-            // at the top level.
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+            ImGui::BeginChild("ModuleList", ImVec2(0, 0), false);
+
+            // Render only top-level entries. Group children are rendered inside
+            // their TreeNode, with full-width selectable rows.
             for (size_t i = 0; i < entries.size(); ++i) {
                 const auto& e = entries[i];
                 if (e.parent != nullptr) continue;
                 if (!e.isGroup) {
-                    if (ImGui::Selectable(e.label, selectedModule == (int)i, 0, ImVec2(180, 0))) {
-                        if (selectedModule != (int)i) { selectedModule = (int)i; runModule(selectedModule); }
-                    }
-                } else {
-                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
-                                               ImGuiTreeNodeFlags_OpenOnDoubleClick |
-                                               ImGuiTreeNodeFlags_SpanFullWidth;
-                    bool open = ImGui::TreeNodeEx((void*)(intptr_t)i, flags, "%s", e.label);
-                    if (open) {
-                        // Children come straight from the group's children
-                        // list. Each child is also an entry (so its index
-                        // is a valid `selectedModule`).
-                        const auto& kids = e.group.children;
-                        for (size_t j = 0; j < entries.size(); ++j) {
-                            const auto& c = entries[j];
-                            if (c.isGroup) continue;
-                            bool isThisGroupChild = false;
-                            for (IModule* k : kids) if (c.leaf.mod == k) { isThisGroupChild = true; break; }
-                            if (!isThisGroupChild) continue;
-                            ImGui::Indent();
-                            if (ImGui::Selectable(c.label, selectedModule == (int)j, 0, ImVec2(160, 0))) {
-                                if (selectedModule != (int)j) { selectedModule = (int)j; runModule(selectedModule); }
-                            }
-                            ImGui::Unindent();
+                    const float rowWidth = ImGui::GetContentRegionAvail().x;
+                    if (ImGui::Selectable(e.label, selectedModule == static_cast<int>(i),
+                                          0, ImVec2(rowWidth, 0))) {
+                        if (selectedModule != static_cast<int>(i)) {
+                            selectedModule = static_cast<int>(i);
+                            runModule(selectedModule);
                         }
-                        ImGui::TreePop();
                     }
+                    continue;
+                }
+
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                           ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                                           ImGuiTreeNodeFlags_SpanFullWidth;
+                if (std::strcmp(e.label, "Test Components") == 0) {
+                    flags |= ImGuiTreeNodeFlags_DefaultOpen;
+                }
+
+                const bool open = ImGui::TreeNodeEx(
+                    reinterpret_cast<void*>(static_cast<intptr_t>(i)),
+                    flags, "%s (%zu)", e.label, e.group.children.size());
+
+                if (open) {
+                    for (IModule* child : e.group.children) {
+                        for (size_t j = 0; j < entries.size(); ++j) {
+                            const auto& childEntry = entries[j];
+                            if (childEntry.isGroup || childEntry.leaf.mod != child) continue;
+                            const float rowWidth = ImGui::GetContentRegionAvail().x;
+                            if (ImGui::Selectable(childEntry.label,
+                                                  selectedModule == static_cast<int>(j),
+                                                  0, ImVec2(rowWidth, 0))) {
+                                if (selectedModule != static_cast<int>(j)) {
+                                    selectedModule = static_cast<int>(j);
+                                    runModule(selectedModule);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    ImGui::TreePop();
                 }
             }
+
+            ImGui::EndChild();
+            ImGui::PopStyleVar();
 
             ImGui::End();
         }
@@ -728,6 +945,7 @@ int main(int argc, char* argv[]) {
 
     // All leaf modules are owned by `allLeaves`; delete them once at the
     // end. Group entries have no extra resources to free.
+    controlBridge.shutdown();
     for (IModule* m : allLeaves) delete m;
     SDL_DestroyTexture(canvas);
     ImGui_ImplSDLRenderer2_Shutdown();

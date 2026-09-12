@@ -5,7 +5,6 @@
 #include <memory>
 #include "engine/editor/GameObject.hpp"
 #include "engine/editor/Sprite2D.hpp"
-#include "engine/editor/MusicPlayer.hpp"
 #include "engine/editor/Cinemachine.hpp"
 #include "engine/editor/ITransformUI.hpp"
 #include "core/camera/Camera.hpp"
@@ -27,7 +26,6 @@ public:
 
     GameObject* createGameObject(const std::string& name = "GameObject");
     Sprite2D* createSprite2D(const std::string& name = "Sprite2D");
-    MusicPlayer* createMusicPlayer(const std::string& name = "MusicPlayer");
     Cinemachine* createCinemachine(const std::string& name = "Cinemachine");
     void setParent(GameObject* child, GameObject* parent);
     void destroyGameObject(GameObject* obj);

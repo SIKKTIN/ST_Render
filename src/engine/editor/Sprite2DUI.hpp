@@ -1,11 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include "TransformUI_ImGui.hpp"
 #include "engine/editor/Sprite2D.hpp"
-#include "engine/editor/MusicPlayer.hpp"
-#include "modules/music/MusicManager.hpp"
 #include "engine/editor/TextureManager.hpp"
-#include "engine/editor/AudioManager.hpp"
 #include "engine/editor/Script.hpp"
 #include <SDL2/SDL.h>
 #include <functional>
@@ -19,10 +16,8 @@ class ScriptUI;
 class Sprite2DUI : public TransformUI_ImGui {
 public:
     using TextureCallback = std::function<void(int idx)>;
-    using AudioCallback = std::function<void(int idx)>;
 
     void setTextureCallback(TextureCallback cb) { m_onTextureChanged = std::move(cb); }
-    void setAudioCallback(AudioCallback cb) { m_onAudioChanged = std::move(cb); }
     void setThumbnails(SDL_Renderer* renderer, const std::vector<SDL_Texture*>& thumbs) {
         m_renderer = renderer;
         m_thumbnails = &thumbs;
@@ -35,62 +30,11 @@ public:
 
         if (auto* sprite = dynamic_cast<Sprite2D*>(obj)) {
             changed = renderSpriteControls(sprite) || changed;
-        } else if (auto* mp = dynamic_cast<MusicPlayer*>(obj)) {
-            changed = renderMusicPlayerControls(mp) || changed;
         }
 
         changed = renderScriptSection(obj) || changed;
 
         return changed;
-    }
-
-    void renderAudioBrowserOnTop() {
-        if (!m_audioBrowserOpen || !m_browserPlayer) return;
-
-        ImGuiIO& io = ImGui::GetIO();
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f - 240.0f,
-                                       io.DisplaySize.y * 0.5f - 200.0f), ImGuiCond_Once);
-        ImGui::SetNextWindowSize(ImVec2(480, 380), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowFocus();
-        ImGui::SetNextWindowBgAlpha(0.95f);
-
-        if (ImGui::Begin("Audio Browser", &m_audioBrowserOpen,
-                         ImGuiWindowFlags_NoCollapse)) {
-            ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "Data/Audio/");
-            ImGui::Separator();
-
-            int audioCount = AudioManager::getInstance().getAudioCount();
-            if (audioCount == 0) {
-                ImGui::TextDisabled("No audio files in Data/Audio/");
-            } else {
-                const auto& audios = AudioManager::getInstance().getAllAudios();
-                ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, ImVec2(0.0f, 0.5f));
-                if (ImGui::BeginChild("audio_list", ImVec2(0, 300), true)) {
-                    for (int i = 0; i < audioCount; i++) {
-                        bool isSelected = (i == m_browserPlayer->getAudioIndex());
-                        if (ImGui::Selectable(audios[i].filename.c_str(), isSelected, ImGuiSelectableFlags_None, ImVec2(0, 30))) {
-                            m_browserPlayer->setAudioIndex(i);
-                            m_browserPlayer->setAudioPath(audios[i].filename);
-                            if (m_onAudioChanged) m_onAudioChanged(i);
-                            m_audioBrowserOpen = false;
-                        }
-                        if (ImGui::IsItemHovered()) {
-                            ImGui::BeginTooltip();
-                            ImGui::Text("%s", audios[i].fullPath.c_str());
-                            ImGui::EndTooltip();
-                        }
-                    }
-                    ImGui::EndChild();
-                }
-                ImGui::PopStyleVar();
-            }
-
-            ImGui::Separator();
-            if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-                m_audioBrowserOpen = false;
-            }
-            ImGui::End();
-        }
     }
 
     void renderBrowserOnTop() {
@@ -154,74 +98,6 @@ public:
             }
             ImGui::End();
         }
-    }
-
-    bool renderMusicPlayerControls(MusicPlayer* player) {
-        bool changed = false;
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.3f, 0.6f, 1.0f, 1.0f), "MusicPlayer");
-
-        ImGui::Text("Audio: %s",
-            player->getAudioIndex() >= 0
-                ? AudioManager::getInstance().getAudioName(player->getAudioIndex()).c_str()
-                : "(none)");
-        if (ImGui::Button("Browse Audio...")) {
-            m_browserPlayer = player;
-            m_audioBrowserOpen = true;
-        }
-
-        ImGui::Spacing();
-
-        const char* playLabel = ST::MusicManager::get().isPlaying() ? "Stop" : "Play";
-        if (ImGui::Button(playLabel, ImVec2(100, 30))) {
-            auto& mgr = ST::MusicManager::get();
-            if (mgr.isPlaying()) {
-                mgr.stop();
-            } else {
-                if (player->getAudioIndex() >= 0) {
-                    std::string fullPath = AudioManager::getInstance().getAudioFullPath(player->getAudioIndex());
-                    if (mgr.loadMusic(fullPath)) {
-                        mgr.setVolume(player->getVolume());
-                        mgr.play();
-                    }
-                }
-            }
-        }
-
-        ImGui::SameLine();
-        if (ImGui::Button("Pause", ImVec2(100, 30))) {
-            auto& mgr = ST::MusicManager::get();
-            if (mgr.isPaused()) {
-                mgr.resume();
-            } else if (mgr.isPlaying()) {
-                mgr.pause();
-            }
-        }
-
-        ImGui::Spacing();
-        ImGui::Text("Volume");
-        int vol = player->getVolume();
-        if (ImGui::SliderInt("##vol", &vol, 0, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
-            player->setVolume(vol);
-            ST::MusicManager::get().setVolume(vol);
-            changed = true;
-        }
-
-        bool loop = player->getLoop();
-        if (ImGui::Checkbox("Loop", &loop)) {
-            player->setLoop(loop);
-            changed = true;
-        }
-
-        bool autoPlay = player->getAutoPlay();
-        if (ImGui::Checkbox("Auto Play", &autoPlay)) {
-            player->setAutoPlay(autoPlay);
-            changed = true;
-        }
-
-        return changed;
     }
 
 private:
@@ -335,13 +211,10 @@ private:
     }
 
     TextureCallback m_onTextureChanged;
-    AudioCallback m_onAudioChanged;
     const std::vector<SDL_Texture*>* m_thumbnails = nullptr;
     SDL_Renderer* m_renderer = nullptr;
     Sprite2D* m_browserSprite = nullptr;
-    MusicPlayer* m_browserPlayer = nullptr;
     bool m_browserOpen = false;
-    bool m_audioBrowserOpen = false;
     ImVec2 m_browserSize = ImVec2(600, 400);
 };
 

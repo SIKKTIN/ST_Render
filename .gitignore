@@ -76,8 +76,8 @@ Thumbs.db
 desktop.ini
 ehthumbs.db
 *.stackdump
-core
-core.*
+/core
+/core.*
 *.core
 *.dmp
 *.ipdb
@@ -144,10 +144,6 @@ imgui.ini
 # ---------- 临时/本地目录（不入库）----------
 # 旧版架构文档目录（已迁移到 Docs/architecture/）
 document/
-# 早期网络模块占位（空目录，已废弃）
-NetWork/
-# 构建脚本（路径硬编码，非通用）
-scripts/
 
 # ---------- 操作员临时笔记 ----------
 prompt.txt

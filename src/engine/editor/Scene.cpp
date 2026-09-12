@@ -41,13 +41,6 @@ Sprite2D* Scene::createSprite2D(const std::string& name) {
     return ptr;
 }
 
-MusicPlayer* Scene::createMusicPlayer(const std::string& name) {
-    auto obj = std::make_unique<MusicPlayer>(name);
-    MusicPlayer* ptr = obj.get();
-    objects.push_back(std::move(obj));
-    return ptr;
-}
-
 Cinemachine* Scene::createCinemachine(const std::string& name) {
     auto obj = std::make_unique<Cinemachine>(name);
     Cinemachine* ptr = obj.get();

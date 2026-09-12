@@ -15,8 +15,6 @@ set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRIN
 # SDL2 依赖
 find_package(SDL2 CONFIG REQUIRED)
 
-# SDL2_mixer 依赖
-find_package(SDL2_mixer CONFIG REQUIRED)
 
 # ImGui 依赖
 find_package(imgui CONFIG REQUIRED)

@@ -85,6 +85,8 @@ namespace ST {
 		void clearLights();
 
 		void setAmbient(const Vector3& ambient);
+		void setViewPosition(const Vector3& position) { m_viewPosition = position; }
+		const Vector3& getViewPosition() const { return m_viewPosition; }
 
 		Color shade(const VertexOut& vertexOut);
 

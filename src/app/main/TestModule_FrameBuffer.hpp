@@ -10,6 +10,7 @@ public:
     ~TestModule_FrameBuffer();
 
     const char* getName() const override { return "FrameBuffer Test"; }
+    const char* getCategory() const override { return "TestComponent"; }
 
     void render(void* canvasTexture, int canvasW, int canvasH) override;
     bool renderControls() override;

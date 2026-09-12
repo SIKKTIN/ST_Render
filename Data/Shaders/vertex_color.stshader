@@ -1,0 +1,9 @@
+// Pass the mesh vertex colour through a custom varying.
+vertex {
+    output.position = uniform.mvp * input.position;
+    output.varying0 = input.color;
+}
+
+fragment {
+    output.color = input.varying0;
+}

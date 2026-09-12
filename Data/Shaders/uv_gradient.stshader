@@ -1,0 +1,9 @@
+// Visualize UV coordinates as red/green.
+vertex {
+    output.position = uniform.mvp * input.position;
+    output.varying0 = vec4(input.uv, 0, 1);
+}
+
+fragment {
+    output.color = input.varying0;
+}

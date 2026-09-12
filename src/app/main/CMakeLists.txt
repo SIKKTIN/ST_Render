@@ -5,29 +5,28 @@
 # 主入口：test_manager_main.cpp 负责启动 ImGui 框架
 add_executable(ST_Render_Manager
     test_manager_main.cpp
+    AppControlBridge.cpp
     HierarchyPanel.cpp
     TestModule_FrameBuffer.cpp
     TestModule_Rasterizer.cpp
     TestModule_3DRender.cpp
     TestModule_Texture.cpp
-    TestModule_Music.cpp
-    TestModule_NetworkTest.cpp
+    TestModule_Shader.cpp
     ../module/review/TestModule_ReviewMath.cpp
-    ../module/review/TestModule_ReviewBeta.cpp
-    ../module/review/TestModule_ReviewGamma.cpp
-    ../module/review/TestModule_ReviewDelta.cpp
+    ../module/review/TestModule_ReviewRasterizer.cpp
     imgui_impl_sdl2.cpp
     imgui_impl_sdlrenderer2.cpp
 )
 
 target_link_libraries(ST_Render_Manager PRIVATE
-    Math Buffer Geometry Transform Camera Pipeline Renderer Editor DataBase Music
+    Math Buffer Geometry Transform Camera Pipeline Renderer Editor DataBase
+    nlohmann_json::nlohmann_json
     $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
     $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
     imgui::imgui
 )
 
-target_link_options(ST_Render_Manager PRIVATE /OPT:NOREF /WHOLEARCHIVE:$<TARGET_FILE:Editor> /WHOLEARCHIVE:$<TARGET_FILE:DataBase> /WHOLEARCHIVE:$<TARGET_FILE:Music>)
+target_link_options(ST_Render_Manager PRIVATE /OPT:NOREF /WHOLEARCHIVE:$<TARGET_FILE:Editor> /WHOLEARCHIVE:$<TARGET_FILE:DataBase>)
 
 #if(WIN32)
 # Offline diagnostic for TestModule_3DRender. Renders the cube off-screen at
@@ -62,30 +61,20 @@ if(WIN32)
         VERBATIM
     )
 
-    # Copy SDL2_mixer.dll
-    add_custom_command(TARGET ST_Render_Manager POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:SDL2_mixer::SDL2_mixer>
-            $<TARGET_FILE_DIR:ST_Render_Manager>
-        COMMENT "Copying SDL2_mixer.dll"
-        VERBATIM
-    )
-
-    # Copy mpg123 DLL (MP3 decoder for SDL2_mixer)
-    add_custom_command(TARGET ST_Render_Manager POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "C:/vcpkg/installed/x64-windows/bin/mpg123.dll"
-            $<TARGET_FILE_DIR:ST_Render_Manager>
-        COMMENT "Copying mpg123.dll"
-        VERBATIM
-    )
-
-    # Copy Data folder (Audio)
+    # Keep scene fixtures available beside the executable.
     add_custom_command(TARGET ST_Render_Manager POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_SOURCE_DIR}/Data"
-            $<TARGET_FILE_DIR:ST_Render_Manager>/Data
-        COMMENT "Copying Data folder"
+            "${CMAKE_SOURCE_DIR}/Data/ScenePrefab"
+            $<TARGET_FILE_DIR:ST_Render_Manager>/Data/ScenePrefab
+        COMMENT "Copying scene fixtures"
+        VERBATIM
+    )
+
+    add_custom_command(TARGET ST_Render_Manager POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/Data/Shaders"
+            $<TARGET_FILE_DIR:ST_Render_Manager>/Data/Shaders
+        COMMENT "Copying shader scripts"
         VERBATIM
     )
 endif()

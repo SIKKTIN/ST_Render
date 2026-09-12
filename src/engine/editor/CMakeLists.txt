@@ -5,11 +5,8 @@ add_library(Editor
     Scene.cpp
     Sprite2D.cpp
     Script.cpp
-    MusicPlayer.cpp
     TextureManager.cpp
-    AudioManager.cpp
     Cinemachine.cpp
-    NetWork/NetworkDiscovery.cpp
     UI/UIBase.cpp
     UI/UIWidget.cpp
     UI/UIPanel.cpp

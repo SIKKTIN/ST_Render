@@ -1,0 +1,10 @@
+// Minimal programmable shader used as a loading example.
+vertex {
+    output.position = uniform.mvp * input.position;
+    output.normal = normalize(input.normal);
+    output.varying0 = vec4(input.uv, 0, 1);
+}
+
+fragment {
+    output.color = input.color;
+}
