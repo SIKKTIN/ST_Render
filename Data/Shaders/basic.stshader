@@ -6,5 +6,5 @@ vertex {
 }
 
 fragment {
-    output.color = input.color;
+    output.color = texture(input.uv);
 }

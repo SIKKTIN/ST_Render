@@ -415,9 +415,11 @@ int main(int argc, char* argv[]) {
                 { "module", "3D Render" },
                 { "selectedModel", render3D->getSelectedModelIndex() },
                 { "error", render3D->getModelError() },
+                { "textureStatus", render3D->getModelTextureStatus() },
                 { "vertexCount", model ? model->getVertexCount() : 8 },
                 { "triangleCount", model ? model->getTriangleCount() : 12 },
                 { "partCount", model ? static_cast<int>(model->parts.size()) : 1 },
+                { "materialCount", model ? static_cast<int>(model->materials.size()) : 0 },
                 { "models", models }
             };
         }

@@ -4,3 +4,5 @@ Used as a small OBJ importer smoke-test asset.
 sphere.obj source: https://github.com/melfm/openGL-shading-texture/blob/master/Models/sphere.obj
 teapot.obj source: https://github.com/jaz303/utah-teapot/blob/master/teapot.obj
 suzanne.obj source: https://github.com/alecjacobson/common-3d-test-models/blob/master/data/suzanne.obj
+textured_cube.obj and textured_cube.mtl source: https://gist.github.com/noonat/1131091
+checker.png is a generated four-color checker texture used to exercise map_Kd loading.

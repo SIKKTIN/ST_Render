@@ -7,15 +7,26 @@
 
 namespace ST {
 
+struct ModelMaterial {
+    std::string name;
+    Color ambient = Color(0.1f, 0.1f, 0.1f);
+    Color diffuse = Color::white();
+    Color specular = Color(0.5f, 0.5f, 0.5f);
+    float shininess = 32.0f;
+    std::string diffuseTexturePath;
+};
+
 struct ModelPart {
     std::string name;
     std::string materialName;
+    int materialIndex = -1;
     Mesh mesh;
 };
 
 struct ModelAsset {
     std::string sourcePath;
     std::vector<ModelPart> parts;
+    std::vector<ModelMaterial> materials;
     Vector3 boundsMin = Vector3::zero();
     Vector3 boundsMax = Vector3::zero();
     Vector3 boundsCenter = Vector3::zero();

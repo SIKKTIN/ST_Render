@@ -50,6 +50,10 @@ Dependencies/
 *.a
 *.o
 *.obj
+!Data/Models/
+!Data/Models/*.obj
+!Data/Models/*.mtl
+!Data/Models/*.png
 
 # ---------- 可执行文件 ----------
 *.exe

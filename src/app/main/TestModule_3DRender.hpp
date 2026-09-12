@@ -12,6 +12,7 @@
 #include "renderer/asset/ModelAsset.hpp"
 #include "renderer/asset/ModelCatalog.hpp"
 #include "renderer/asset/ObjModelLoader.hpp"
+#include "core/texture/ST_Image.hpp"
 #include "renderer/geometry/Vertex.hpp"
 #include "renderer/geometry/Mesh.hpp"
 #include "core/math/Matrix4x4.hpp"
@@ -43,6 +44,7 @@ public:
     const std::vector<ST::ModelEntry>& getModelEntries() const { return m_modelCatalog.getEntries(); }
     int getSelectedModelIndex() const { return m_selectedModelIndex; }
     const std::string& getModelError() const { return m_modelError; }
+    const std::string& getModelTextureStatus() const { return m_modelTextureStatus; }
     bool selectModelIndex(int index);
     const ST::ModelAsset* getActiveModel() const { return m_modelLoaded ? &m_activeModel : nullptr; }
 
@@ -85,6 +87,8 @@ private:
     int m_selectedModelIndex = -1;
     std::string m_modelError;
     std::string m_modelRoot = "Data/Models";
+    ST::Image m_modelDiffuseTexture;
+    std::string m_modelTextureStatus;
     ST::ShaderCatalog m_shaderCatalog;
     ST::ShaderManager m_shaderManager;
     std::shared_ptr<ST::IShaderProgram> m_builtinShader;

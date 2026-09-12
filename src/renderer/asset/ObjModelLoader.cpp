@@ -6,6 +6,7 @@
 #include <limits>
 #include <sstream>
 #include <unordered_map>
+#include <filesystem>
 
 namespace ST {
 namespace {
@@ -54,6 +55,52 @@ bool parseFaceIndex(const std::string& token, ObjIndex& result) {
     return result.position != 0;
 }
 
+std::string trim(std::string value) {
+    const size_t first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return {};
+    const size_t last = value.find_last_not_of(" \t\r\n");
+    return value.substr(first, last - first + 1);
+}
+
+void loadMaterialLibrary(const std::filesystem::path& path,
+                         std::vector<ModelMaterial>& materials) {
+    std::ifstream file(path);
+    if (!file.is_open()) return;
+
+    ModelMaterial* current = nullptr;
+    std::string line;
+    while (std::getline(file, line)) {
+        std::stringstream stream(line);
+        std::string tag;
+        stream >> tag;
+        if (tag.empty() || tag[0] == '#') continue;
+
+        if (tag == "newmtl") {
+            std::string name;
+            stream >> name;
+            if (name.empty()) continue;
+            materials.push_back(ModelMaterial{});
+            materials.back().name = name;
+            current = &materials.back();
+        } else if (!current) {
+            continue;
+        } else if (tag == "Ka") {
+            stream >> current->ambient.r >> current->ambient.g >> current->ambient.b;
+        } else if (tag == "Kd") {
+            stream >> current->diffuse.r >> current->diffuse.g >> current->diffuse.b;
+        } else if (tag == "Ks") {
+            stream >> current->specular.r >> current->specular.g >> current->specular.b;
+        } else if (tag == "Ns") {
+            stream >> current->shininess;
+        } else if (tag == "map_Kd") {
+            std::string texturePath;
+            std::getline(stream, texturePath);
+            current->diffuseTexturePath =
+                (path.parent_path() / trim(texturePath)).lexically_normal().string();
+        }
+    }
+}
+
 } // namespace
 
 bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::string& error) {
@@ -66,6 +113,7 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
     std::vector<Vector3> positions;
     std::vector<Vector2> texCoords;
     std::vector<Vector3> normals;
+    std::vector<std::string> materialLibraries;
     ModelPart part;
     part.name = "default";
     std::unordered_map<ObjIndex, int, ObjIndexHash> vertexMap;
@@ -129,6 +177,10 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
                 return false;
             }
             normals.push_back(value.normalized());
+        } else if (tag == "mtllib") {
+            std::string library;
+            stream >> library;
+            if (!library.empty()) materialLibraries.push_back(library);
         } else if (tag == "o" || tag == "g") {
             std::string name;
             stream >> name;
@@ -195,6 +247,16 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
 
     asset = {};
     asset.sourcePath = path;
+    const std::filesystem::path objPath(path);
+    for (const std::string& library : materialLibraries) {
+        loadMaterialLibrary(objPath.parent_path() / library, asset.materials);
+    }
+    for (size_t i = 0; i < asset.materials.size(); ++i) {
+        if (asset.materials[i].name == part.materialName) {
+            part.materialIndex = static_cast<int>(i);
+            break;
+        }
+    }
     asset.parts.push_back(std::move(part));
     asset.boundsMin = minValue;
     asset.boundsMax = maxValue;

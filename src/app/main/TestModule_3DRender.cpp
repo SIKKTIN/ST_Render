@@ -184,6 +184,38 @@ bool TestModule_3DRender::loadSelectedModel() {
     m_activeModel = std::move(loaded);
     m_modelLoaded = true;
     m_modelError.clear();
+
+    // Apply the first OBJ material to the existing Blinn-Phong path and load
+    // its diffuse map. Models without an MTL or map_Kd keep the white fallback
+    // texture, so legacy assets remain valid.
+    m_modelDiffuseTexture.clear();
+    m_modelTextureStatus.clear();
+    m_fragmentShader.setTexture({}, 0, 0);
+    if (!m_activeModel.parts.empty()) {
+        const ST::ModelPart& part = m_activeModel.parts.front();
+        if (part.materialIndex >= 0 &&
+            part.materialIndex < static_cast<int>(m_activeModel.materials.size())) {
+            const ST::ModelMaterial& material = m_activeModel.materials[part.materialIndex];
+            m_material.ambient = material.ambient.rgb;
+            m_material.diffuse = material.diffuse.rgb;
+            m_material.specular = material.specular.rgb;
+            m_material.shininess = std::max(1.0f, material.shininess);
+            if (!material.diffuseTexturePath.empty()) {
+                if (m_modelDiffuseTexture.load(material.diffuseTexturePath.c_str())) {
+                    m_fragmentShader.setTexture(m_modelDiffuseTexture.getPixels(),
+                                                m_modelDiffuseTexture.getWidth(),
+                                                m_modelDiffuseTexture.getHeight());
+                    m_modelTextureStatus = "Diffuse texture: " + material.diffuseTexturePath;
+                } else {
+                    m_modelTextureStatus = "Diffuse texture missing: " + material.diffuseTexturePath;
+                }
+            } else {
+                m_modelTextureStatus = "Material loaded without diffuse texture";
+            }
+        } else {
+            m_modelTextureStatus = "No MTL material; using default white material";
+        }
+    }
     needsRerender = true;
     return true;
 }
@@ -539,6 +571,8 @@ bool TestModule_3DRender::renderModelControls() {
         ImGui::Text("Parts: %d  Vertices: %d  Triangles: %d",
                     static_cast<int>(m_activeModel.parts.size()),
                     m_activeModel.getVertexCount(), m_activeModel.getTriangleCount());
+        ImGui::Text("Materials: %d", static_cast<int>(m_activeModel.materials.size()));
+        if (!m_modelTextureStatus.empty()) ImGui::TextWrapped("%s", m_modelTextureStatus.c_str());
     } else {
         ImGui::TextDisabled("Active: built-in cube");
     }
