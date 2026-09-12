@@ -148,9 +148,9 @@ void TestModule_3DRender::pollShaderReload() {
 
 void TestModule_3DRender::scanModelCatalog() {
     const std::string previousPath =
-        (m_selectedModelIndex >= 0 &&
-         m_selectedModelIndex < static_cast<int>(m_modelCatalog.getEntries().size()))
-            ? m_modelCatalog.getEntries()[m_selectedModelIndex].relativePath
+        (m_addModelIndex >= 0 &&
+         m_addModelIndex < static_cast<int>(m_modelCatalog.getEntries().size()))
+            ? m_modelCatalog.getEntries()[m_addModelIndex].relativePath
             : std::string();
 
     std::string error;
@@ -158,6 +158,7 @@ void TestModule_3DRender::scanModelCatalog() {
         const std::string fallback = "../../Data/Models";
         if (!m_modelCatalog.scan(fallback, error)) {
             m_selectedModelIndex = -1;
+            m_addModelIndex = -1;
             m_modelLoaded = false;
             m_modelError = error;
             return;
@@ -165,62 +166,219 @@ void TestModule_3DRender::scanModelCatalog() {
         m_modelRoot = fallback;
     }
 
-    m_selectedModelIndex = m_modelCatalog.findByRelativePath(previousPath);
-    if (m_selectedModelIndex < 0 && !m_modelCatalog.getEntries().empty()) {
-        m_selectedModelIndex = 0;
+    m_addModelIndex = m_modelCatalog.findByRelativePath(previousPath);
+    if (m_addModelIndex < 0 && !m_modelCatalog.getEntries().empty()) {
+        m_addModelIndex = 0;
+    }
+
+    // A refresh may reorder catalog entries. Scene objects retain their
+    // already loaded assets, while their indices are remapped by path.
+    for (auto& object : m_sceneObjects) {
+        object.modelIndex = m_modelCatalog.findByRelativePath(object.modelPath);
     }
     m_modelError.clear();
-    if (m_selectedModelIndex >= 0) loadSelectedModel();
+    if (m_sceneObjects.empty() && m_addModelIndex >= 0) {
+        createSceneObject(m_addModelIndex);
+    } else {
+        selectSceneObject(m_selectedSceneObject);
+    }
 }
 
 bool TestModule_3DRender::loadSelectedModel() {
     const auto& entries = m_modelCatalog.getEntries();
     if (m_selectedModelIndex < 0 || m_selectedModelIndex >= static_cast<int>(entries.size())) {
-        m_modelLoaded = false;
-        m_modelError.clear();
-        return true;
+        return false;
+    }
+
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) {
+        return createSceneObject(m_selectedModelIndex);
+    }
+    return replaceSceneObjectModel(m_selectedSceneObject, m_selectedModelIndex);
+}
+
+bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelIndex) {
+    const auto& entries = m_modelCatalog.getEntries();
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size()) ||
+        modelIndex < 0 || modelIndex >= static_cast<int>(entries.size())) {
+        return false;
     }
 
     ST::ModelAsset loaded;
     std::string error;
-    if (!ST::ObjModelLoader::load(entries[m_selectedModelIndex].absolutePath, loaded, error)) {
+    if (!ST::ObjModelLoader::load(entries[modelIndex].absolutePath, loaded, error)) {
         m_modelError = error;
         return false;
     }
-    m_activeModel = std::move(loaded);
-    m_modelLoaded = true;
+
+    SceneObject& object = m_sceneObjects[objectIndex];
+    object.modelIndex = modelIndex;
+    object.modelPath = entries[modelIndex].relativePath;
+    object.model = std::make_shared<ST::ModelAsset>(std::move(loaded));
+    if (object.name.empty()) {
+        object.name = entries[modelIndex].displayName + " " + std::to_string(object.id);
+    }
+    object.material = ST::Material::defaultMaterial();
+    object.diffuseTexture.clear();
+    object.textureStatus.clear();
     m_modelError.clear();
 
-    // Apply the first OBJ material to the existing Blinn-Phong path and load
-    // its diffuse map. Models without an MTL or map_Kd keep the white fallback
-    // texture, so legacy assets remain valid.
-    m_modelDiffuseTexture.clear();
-    m_modelTextureStatus.clear();
-    m_fragmentShader.setTexture({}, 0, 0);
-    if (!m_activeModel.parts.empty()) {
-        const ST::ModelPart& part = m_activeModel.parts.front();
+    // Each scene object owns its material and texture state. This keeps
+    // adding a second model from changing the appearance of the first one.
+    if (!object.model->parts.empty()) {
+        const ST::ModelPart& part = object.model->parts.front();
         if (part.materialIndex >= 0 &&
-            part.materialIndex < static_cast<int>(m_activeModel.materials.size())) {
-            const ST::ModelMaterial& material = m_activeModel.materials[part.materialIndex];
-            m_material.ambient = material.ambient.rgb;
-            m_material.diffuse = material.diffuse.rgb;
-            m_material.specular = material.specular.rgb;
-            m_material.shininess = std::max(1.0f, material.shininess);
+            part.materialIndex < static_cast<int>(object.model->materials.size())) {
+            const ST::ModelMaterial& material = object.model->materials[part.materialIndex];
+            object.material.ambient = material.ambient.rgb;
+            object.material.diffuse = material.diffuse.rgb;
+            object.material.specular = material.specular.rgb;
+            object.material.shininess = std::max(1.0f, material.shininess);
             if (!material.diffuseTexturePath.empty()) {
-                if (m_modelDiffuseTexture.load(material.diffuseTexturePath.c_str())) {
-                    m_fragmentShader.setTexture(m_modelDiffuseTexture.getPixels(),
-                                                m_modelDiffuseTexture.getWidth(),
-                                                m_modelDiffuseTexture.getHeight());
-                    m_modelTextureStatus = "Diffuse texture: " + material.diffuseTexturePath;
+                if (object.diffuseTexture.load(material.diffuseTexturePath.c_str())) {
+                    object.textureStatus = "Diffuse texture: " + material.diffuseTexturePath;
                 } else {
-                    m_modelTextureStatus = "Diffuse texture missing: " + material.diffuseTexturePath;
+                    object.textureStatus = "Diffuse texture missing: " + material.diffuseTexturePath;
                 }
             } else {
-                m_modelTextureStatus = "Material loaded without diffuse texture";
+                object.textureStatus = "Material loaded without diffuse texture";
             }
         } else {
-            m_modelTextureStatus = "No MTL material; using default white material";
+            object.textureStatus = "No MTL material; using default white material";
         }
+    }
+    selectSceneObject(objectIndex);
+    needsRerender = true;
+    return true;
+}
+
+bool TestModule_3DRender::createSceneObject(int modelIndex) {
+    if (modelIndex < 0 || modelIndex >= static_cast<int>(m_modelCatalog.getEntries().size())) {
+        return false;
+    }
+    SceneObject object;
+    object.id = m_nextSceneObjectId++;
+    // Alternate around the origin so new objects remain in front of the
+    // default camera instead of being placed directly underneath it.
+    const int existingCount = static_cast<int>(m_sceneObjects.size());
+    if (existingCount > 0) {
+        const int ring = (existingCount + 1) / 2;
+        object.position.x = (existingCount % 2 == 1 ? -1.0f : 1.0f) *
+                            static_cast<float>(ring) * 1.8f;
+    }
+    m_sceneObjects.push_back(std::move(object));
+    const int objectIndex = static_cast<int>(m_sceneObjects.size()) - 1;
+    if (!replaceSceneObjectModel(objectIndex, modelIndex)) {
+        m_sceneObjects.pop_back();
+        return false;
+    }
+    selectSceneObject(objectIndex);
+    return true;
+}
+
+void TestModule_3DRender::selectSceneObject(int objectIndex) {
+    m_transformGizmoAxis = -1;
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) {
+        m_selectedSceneObject = -1;
+        m_selectedModelIndex = m_addModelIndex;
+        m_modelTextureStatus.clear();
+        m_modelLoaded = !m_sceneObjects.empty();
+        return;
+    }
+    m_selectedSceneObject = objectIndex;
+    const SceneObject& object = m_sceneObjects[objectIndex];
+    m_selectedModelIndex = object.modelIndex;
+    m_addModelIndex = object.modelIndex >= 0 ? object.modelIndex : m_addModelIndex;
+    m_modelTextureStatus = object.textureStatus;
+    m_modelLoaded = object.model != nullptr;
+}
+
+void TestModule_3DRender::duplicateSelectedSceneObject() {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
+    SceneObject copy = m_sceneObjects[m_selectedSceneObject];
+    copy.id = m_nextSceneObjectId++;
+    copy.name += " Copy";
+    copy.position.x += 0.5f;
+    copy.position.z += 0.5f;
+    m_sceneObjects.push_back(std::move(copy));
+    selectSceneObject(static_cast<int>(m_sceneObjects.size()) - 1);
+    needsRerender = true;
+}
+
+void TestModule_3DRender::deleteSelectedSceneObject() {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
+    const int removed = m_selectedSceneObject;
+    m_sceneObjects.erase(m_sceneObjects.begin() + removed);
+    if (m_sceneObjects.empty()) {
+        selectSceneObject(-1);
+    } else {
+        selectSceneObject(std::min(removed, static_cast<int>(m_sceneObjects.size()) - 1));
+    }
+    needsRerender = true;
+}
+
+const ST::ModelAsset* TestModule_3DRender::getActiveModel() const {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return nullptr;
+    return m_sceneObjects[m_selectedSceneObject].model.get();
+}
+
+std::vector<TestModule_3DRender::SceneObjectInfo>
+TestModule_3DRender::getSceneObjectInfos() const {
+    std::vector<SceneObjectInfo> result;
+    result.reserve(m_sceneObjects.size());
+    for (int i = 0; i < static_cast<int>(m_sceneObjects.size()); ++i) {
+        const SceneObject& object = m_sceneObjects[i];
+        result.push_back(SceneObjectInfo{
+            object.id,
+            object.name,
+            object.modelIndex,
+            object.modelPath,
+            object.position,
+            object.rotation,
+            object.scale,
+            object.visible,
+            i == m_selectedSceneObject
+        });
+    }
+    return result;
+}
+
+bool TestModule_3DRender::selectSceneObjectIndex(int objectIndex) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return false;
+    selectSceneObject(objectIndex);
+    needsRerender = true;
+    return true;
+}
+
+bool TestModule_3DRender::duplicateSelectedObject() {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return false;
+    duplicateSelectedSceneObject();
+    return true;
+}
+
+bool TestModule_3DRender::deleteSelectedObject() {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return false;
+    deleteSelectedSceneObject();
+    return true;
+}
+
+bool TestModule_3DRender::setSceneObjectTransform(int objectIndex,
+                                                  const ST::Vector3* position,
+                                                  const ST::Vector3* rotation,
+                                                  const ST::Vector3* scale) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return false;
+    SceneObject& object = m_sceneObjects[objectIndex];
+    if (position) object.position = *position;
+    if (rotation) object.rotation = *rotation;
+    if (scale) {
+        object.scale.x = std::clamp(scale->x, 0.01f, 100.0f);
+        object.scale.y = std::clamp(scale->y, 0.01f, 100.0f);
+        object.scale.z = std::clamp(scale->z, 0.01f, 100.0f);
     }
     needsRerender = true;
     return true;
@@ -229,6 +387,7 @@ bool TestModule_3DRender::loadSelectedModel() {
 bool TestModule_3DRender::selectModelIndex(int index) {
     if (index < 0 || index >= static_cast<int>(m_modelCatalog.getEntries().size())) return false;
     m_selectedModelIndex = index;
+    m_addModelIndex = index;
     return loadSelectedModel();
 }
 
@@ -243,6 +402,39 @@ bool TestModule_3DRender::setLightDirection(const ST::Vector3& direction) {
 void TestModule_3DRender::setLightIntensity(float intensity) {
     m_light.intensity = std::clamp(intensity, 0.0f, 5.0f);
     needsRerender = true;
+}
+
+ST::Matrix4x4 TestModule_3DRender::buildSceneObjectMatrix(int objectIndex) const {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) {
+        return ST::Matrix4x4::identity();
+    }
+    const SceneObject& object = m_sceneObjects[objectIndex];
+    ST::Matrix4x4 normalize = ST::Matrix4x4::identity();
+    if (object.model) {
+        const float radius = std::max(0.001f, object.model->boundsRadius);
+        normalize = ST::Matrix4x4::scale(0.9f / radius) *
+                    ST::Matrix4x4::translation(-object.model->boundsCenter);
+    }
+    const float toRadians = static_cast<float>(M_PI) / 180.0f;
+    return ST::Matrix4x4::translation(object.position) *
+           ST::Matrix4x4::rotation(object.rotation.y * toRadians,
+                                   object.rotation.x * toRadians,
+                                   object.rotation.z * toRadians) *
+           ST::Matrix4x4::scale(object.scale.x, object.scale.y, object.scale.z) *
+           normalize;
+}
+
+void TestModule_3DRender::bindSceneObjectMaterial(int objectIndex) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return;
+    const SceneObject& object = m_sceneObjects[objectIndex];
+    m_fragmentShader.setMaterial(object.material);
+    if (object.diffuseTexture.isValid()) {
+        m_fragmentShader.setTexture(object.diffuseTexture.getPixels(),
+                                    object.diffuseTexture.getWidth(),
+                                    object.diffuseTexture.getHeight());
+    } else {
+        m_fragmentShader.setTexture({}, 0, 0);
+    }
 }
 
 void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
@@ -451,17 +643,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
         100.0f
     );
 
-    ST::Matrix4x4 model = ST::Matrix4x4::identity();
-    if (m_modelLoaded) {
-        const float radius = std::max(0.001f, m_activeModel.boundsRadius);
-        // Center and normalize imported assets so arbitrary source units fit
-        // the existing editor camera without requiring per-model settings.
-        model = ST::Matrix4x4::scale(0.9f / radius) *
-                ST::Matrix4x4::translation(-m_activeModel.boundsCenter);
-    }
-
     m_fragmentShader.setViewPosition(eye);
-    m_fragmentShader.setMaterial(m_material);
     m_fragmentShader.setAmbient(m_ambientLight);
     m_fragmentShader.clearLights();
     if (m_lightingEnabled) m_fragmentShader.addLight(m_light);
@@ -469,12 +651,23 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     pollShaderReload();
 
     m_rasterizer.setUseRawScreenCoords(false);
-    if (m_modelLoaded) {
-        for (const auto& part : m_activeModel.parts) {
+    ST::Matrix4x4 selectedModelMatrix = ST::Matrix4x4::identity();
+    bool renderedSceneObject = false;
+    for (int objectIndex = 0; objectIndex < static_cast<int>(m_sceneObjects.size()); ++objectIndex) {
+        const SceneObject& object = m_sceneObjects[objectIndex];
+        if (!object.visible || !object.model) continue;
+        const ST::Matrix4x4 model = buildSceneObjectMatrix(objectIndex);
+        bindSceneObjectMaterial(objectIndex);
+        for (const auto& part : object.model->parts) {
             drawMesh(part.mesh, model, view, projection);
         }
-    } else {
-        drawMesh(m_cube, model, view, projection);
+        if (objectIndex == m_selectedSceneObject) selectedModelMatrix = model;
+        renderedSceneObject = true;
+    }
+    if (!renderedSceneObject) {
+        m_fragmentShader.setMaterial(m_material);
+        m_fragmentShader.setTexture({}, 0, 0);
+        drawMesh(m_cube, ST::Matrix4x4::identity(), view, projection);
     }
 
     // ---- Upload to SDL texture ----
@@ -508,11 +701,14 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
 
     SDL_UpdateTexture(m_outputTexture, nullptr, m_rgba32Buffer.data(), renderW * sizeof(uint32_t));
     SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
-    drawLightGizmo(renderer, canvasW, canvasH, view, projection, model);
+    drawTransformGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
+    drawLightGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
 }
 
 bool TestModule_3DRender::renderControls() {
     bool changed = false;
+    changed |= renderSceneObjectControls();
+
     ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Camera (Fly, UE-style)");
     ImGui::Separator();
 
@@ -555,9 +751,14 @@ bool TestModule_3DRender::renderControls() {
     }
     if (m_light.direction != directionBeforeEdit) syncLightAnglesFromDirection();
     changed |= ImGui::SliderFloat("Light intensity", &m_light.intensity, 0.0f, 5.0f);
-    changed |= ImGui::ColorEdit3("Material diffuse", &m_material.diffuse.x);
-    changed |= ImGui::ColorEdit3("Material specular", &m_material.specular.x);
-    changed |= ImGui::SliderFloat("Shininess", &m_material.shininess, 1.0f, 256.0f);
+    ST::Material* editedMaterial = &m_material;
+    if (m_selectedSceneObject >= 0 &&
+        m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
+        editedMaterial = &m_sceneObjects[m_selectedSceneObject].material;
+    }
+    changed |= ImGui::ColorEdit3("Material diffuse", &editedMaterial->diffuse.x);
+    changed |= ImGui::ColorEdit3("Material specular", &editedMaterial->specular.x);
+    changed |= ImGui::SliderFloat("Shininess", &editedMaterial->shininess, 1.0f, 256.0f);
     changed |= ImGui::ColorEdit3("Ambient", &m_ambientLight.x);
     if (ImGui::Button("Reset Light")) {
         m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
@@ -571,6 +772,108 @@ bool TestModule_3DRender::renderControls() {
     changed |= renderModelControls();
     if (changed) needsRerender = true;
     return changed;
+}
+
+bool TestModule_3DRender::renderSceneObjectControls() {
+    bool changed = false;
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Selected Object");
+    ImGui::Separator();
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) {
+        ImGui::TextDisabled("No scene object selected");
+        ImGui::Spacing();
+        return false;
+    }
+
+    SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+    ImGui::Text("%s", object.name.c_str());
+    if (ImGui::RadioButton("Move (W)", m_transformTool == TransformTool::Translate)) {
+        m_transformTool = TransformTool::Translate;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Rotate (E)", m_transformTool == TransformTool::Rotate)) {
+        m_transformTool = TransformTool::Rotate;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Scale (R)", m_transformTool == TransformTool::Scale)) {
+        m_transformTool = TransformTool::Scale;
+    }
+    changed |= ImGui::Checkbox("Show transform gizmo", &m_showTransformGizmo);
+    changed |= ImGui::Checkbox("Visible", &object.visible);
+    changed |= ImGui::DragFloat3("Position", &object.position.x, 0.05f);
+    changed |= ImGui::DragFloat3("Rotation", &object.rotation.x, 0.5f, -360.0f, 360.0f, "%.1f deg");
+    if (ImGui::DragFloat3("Scale", &object.scale.x, 0.01f, 0.01f, 100.0f)) {
+        object.scale.x = std::clamp(object.scale.x, 0.01f, 100.0f);
+        object.scale.y = std::clamp(object.scale.y, 0.01f, 100.0f);
+        object.scale.z = std::clamp(object.scale.z, 0.01f, 100.0f);
+        changed = true;
+    }
+    if (ImGui::Button("Reset Transform")) {
+        object.position = ST::Vector3::zero();
+        object.rotation = ST::Vector3::zero();
+        object.scale = ST::Vector3(1.0f, 1.0f, 1.0f);
+        changed = true;
+    }
+    ImGui::Spacing();
+    return changed;
+}
+
+void TestModule_3DRender::renderCreatePanel() {
+    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Add Model");
+    ImGui::Separator();
+
+    const auto& entries = m_modelCatalog.getEntries();
+    if (entries.empty()) {
+        ImGui::TextDisabled("No model assets found");
+    } else {
+        if (m_addModelIndex < 0 || m_addModelIndex >= static_cast<int>(entries.size())) {
+            m_addModelIndex = 0;
+        }
+        const char* preview = entries[m_addModelIndex].displayName.c_str();
+        if (ImGui::BeginCombo("Model asset", preview)) {
+            for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
+                const bool selected = i == m_addModelIndex;
+                if (ImGui::Selectable(entries[i].displayName.c_str(), selected)) {
+                    m_addModelIndex = i;
+                }
+                if (selected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entries[i].relativePath.c_str());
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::Button("Add to Scene", ImVec2(-1.0f, 0.0f))) {
+            createSceneObject(m_addModelIndex);
+        }
+    }
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f),
+                       "Scene Hierarchy (%d)", static_cast<int>(m_sceneObjects.size()));
+    ImGui::Separator();
+
+    for (int i = 0; i < static_cast<int>(m_sceneObjects.size()); ++i) {
+        SceneObject& object = m_sceneObjects[i];
+        ImGui::PushID(object.id);
+        if (ImGui::Checkbox("##visible", &object.visible)) needsRerender = true;
+        ImGui::SameLine();
+        if (ImGui::Selectable(object.name.c_str(), i == m_selectedSceneObject)) {
+            selectSceneObject(i);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", object.modelPath.c_str());
+        }
+        ImGui::PopID();
+    }
+
+    ImGui::Separator();
+    if (ImGui::Button("Duplicate") && m_selectedSceneObject >= 0) {
+        duplicateSelectedSceneObject();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete") && m_selectedSceneObject >= 0) {
+        deleteSelectedSceneObject();
+    }
+    ImGui::TextDisabled("Select an object here, then edit its Transform in Controls.");
 }
 
 void TestModule_3DRender::syncLightAnglesFromDirection() {
@@ -588,6 +891,67 @@ void TestModule_3DRender::updateLightDirectionFromAngles() {
     m_light.direction = -sourceDirection;
 }
 
+void TestModule_3DRender::drawTransformGizmo(SDL_Renderer* renderer,
+                                             int canvasW, int canvasH,
+                                             const ST::Matrix4x4& view,
+                                             const ST::Matrix4x4& projection,
+                                             const ST::Matrix4x4& model) {
+    m_transformGizmoValid = false;
+    if (!renderer || !m_showTransformGizmo || m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
+    const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+    if (!object.visible || !object.model) return;
+
+    auto project = [&](const ST::Vector3& world, int& x, int& y) {
+        const ST::Vector4 clip = projection * view * ST::Vector4(world, 1.0f);
+        if (!std::isfinite(clip.w) || clip.w <= 1e-6f) return false;
+        const float ndcX = clip.x / clip.w;
+        const float ndcY = clip.y / clip.w;
+        if (!std::isfinite(ndcX) || !std::isfinite(ndcY)) return false;
+        x = static_cast<int>((ndcX + 1.0f) * 0.5f * canvasW);
+        y = static_cast<int>((1.0f - ndcY) * 0.5f * canvasH);
+        return true;
+    };
+
+    const ST::Vector3 center =
+        (model * ST::Vector4(object.model->boundsCenter, 1.0f)).toVector3();
+    const ST::Vector3 axes[3] = {
+        ST::Vector3(0.75f, 0.0f, 0.0f),
+        ST::Vector3(0.0f, 0.75f, 0.0f),
+        ST::Vector3(0.0f, 0.0f, 0.75f)
+    };
+    if (!project(center, m_transformGizmoCenterX, m_transformGizmoCenterY)) return;
+    for (int axis = 0; axis < 3; ++axis) {
+        if (!project(center + axes[axis], m_transformGizmoEndX[axis], m_transformGizmoEndY[axis])) {
+            return;
+        }
+    }
+    m_transformGizmoValid = true;
+
+    const Uint8 colors[3][3] = {{235, 70, 70}, {80, 220, 95}, {70, 135, 245}};
+    for (int axis = 0; axis < 3; ++axis) {
+        const bool active = axis == m_transformGizmoAxis;
+        SDL_SetRenderDrawColor(renderer,
+            active ? 255 : colors[axis][0],
+            active ? 225 : colors[axis][1],
+            active ? 70 : colors[axis][2], 255);
+        SDL_RenderDrawLine(renderer,
+            m_transformGizmoCenterX, m_transformGizmoCenterY,
+            m_transformGizmoEndX[axis], m_transformGizmoEndY[axis]);
+        SDL_Rect handle{
+            m_transformGizmoEndX[axis] - (active ? 5 : 4),
+            m_transformGizmoEndY[axis] - (active ? 5 : 4),
+            active ? 10 : 8,
+            active ? 10 : 8
+        };
+        if (m_transformTool == TransformTool::Translate) {
+            SDL_RenderFillRect(renderer, &handle);
+        } else {
+            SDL_RenderDrawRect(renderer, &handle);
+        }
+    }
+}
+
 void TestModule_3DRender::drawLightGizmo(SDL_Renderer* renderer,
                                         int canvasW, int canvasH,
                                         const ST::Matrix4x4& view,
@@ -596,11 +960,12 @@ void TestModule_3DRender::drawLightGizmo(SDL_Renderer* renderer,
 {
     if (!renderer || !m_showLightGizmo || !m_lightingEnabled) return;
 
-    const ST::Vector3 center = m_modelLoaded
-        ? (model * ST::Vector4(m_activeModel.boundsCenter, 1.0f)).toVector3()
+    const ST::ModelAsset* activeModel = getActiveModel();
+    const ST::Vector3 center = activeModel
+        ? (model * ST::Vector4(activeModel->boundsCenter, 1.0f)).toVector3()
         : ST::Vector3::zero();
     const ST::Vector3 sourceDirection = (-m_light.direction).normalized();
-    const float length = m_modelLoaded ? 1.35f : 1.4f;
+    const float length = activeModel ? 1.35f : 1.4f;
     const ST::Vector3 endpoint = center + sourceDirection * length;
 
     auto project = [&](const ST::Vector3& world, int& x, int& y) {
@@ -690,14 +1055,15 @@ bool TestModule_3DRender::renderModelControls() {
         changed = true;
     }
 
-    if (m_modelLoaded) {
+    const ST::ModelAsset* activeModel = getActiveModel();
+    if (activeModel) {
         ImGui::Text("Parts: %d  Vertices: %d  Triangles: %d",
-                    static_cast<int>(m_activeModel.parts.size()),
-                    m_activeModel.getVertexCount(), m_activeModel.getTriangleCount());
-        ImGui::Text("Materials: %d", static_cast<int>(m_activeModel.materials.size()));
+                    static_cast<int>(activeModel->parts.size()),
+                    activeModel->getVertexCount(), activeModel->getTriangleCount());
+        ImGui::Text("Materials: %d", static_cast<int>(activeModel->materials.size()));
         if (!m_modelTextureStatus.empty()) ImGui::TextWrapped("%s", m_modelTextureStatus.c_str());
     } else {
-        ImGui::TextDisabled("Active: built-in cube");
+        ImGui::TextDisabled("No scene object selected");
     }
     if (!m_modelError.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "Model error");
@@ -840,6 +1206,41 @@ void TestModule_3DRender::onWheel(float /*dx*/, float dy,
 // cares about deltas, so screen-space (x,y) and canvas-space (cx,cy) are
 // interchangeable here.
 void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY) {
+    if (button == SDL_BUTTON_LEFT && m_transformGizmoValid && m_showTransformGizmo &&
+        m_selectedSceneObject >= 0) {
+        float bestDistanceSquared = 10.0f * 10.0f;
+        int bestAxis = -1;
+        for (int axis = 0; axis < 3; ++axis) {
+            const float ax = static_cast<float>(m_transformGizmoCenterX);
+            const float ay = static_cast<float>(m_transformGizmoCenterY);
+            const float bx = static_cast<float>(m_transformGizmoEndX[axis]);
+            const float by = static_cast<float>(m_transformGizmoEndY[axis]);
+            const float vx = bx - ax;
+            const float vy = by - ay;
+            const float lengthSquared = vx * vx + vy * vy;
+            if (lengthSquared < 16.0f) continue;
+            const float t = std::clamp(
+                ((canvasX - ax) * vx + (canvasY - ay) * vy) / lengthSquared,
+                0.0f, 1.0f);
+            const float px = ax + t * vx;
+            const float py = ay + t * vy;
+            const float dx = canvasX - px;
+            const float dy = canvasY - py;
+            const float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared <= bestDistanceSquared) {
+                bestDistanceSquared = distanceSquared;
+                bestAxis = axis;
+            }
+        }
+        if (bestAxis >= 0) {
+            m_transformGizmoAxis = bestAxis;
+            m_interactionActive = true;
+            m_lastCanvasX = canvasX;
+            m_lastCanvasY = canvasY;
+            needsRerender = true;
+            return;
+        }
+    }
     if (button == SDL_BUTTON_LEFT && m_showLightGizmo && m_lightingEnabled) {
         const float dx = static_cast<float>(canvasX - m_lightGizmoScreenX);
         const float dy = static_cast<float>(canvasY - m_lightGizmoScreenY);
@@ -856,6 +1257,12 @@ void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY
 }
 void TestModule_3DRender::onCanvasMouseUp(int button, int canvasX, int canvasY) {
     (void)canvasX; (void)canvasY;
+    if (m_transformGizmoAxis >= 0 && button == SDL_BUTTON_LEFT) {
+        m_transformGizmoAxis = -1;
+        m_interactionActive = false;
+        needsRerender = true;
+        return;
+    }
     if (m_lightDragActive && button == SDL_BUTTON_LEFT) {
         m_lightDragActive = false;
         m_interactionActive = false;
@@ -865,6 +1272,34 @@ void TestModule_3DRender::onCanvasMouseUp(int button, int canvasX, int canvasY) 
     onMouseUp(button);
 }
 void TestModule_3DRender::onCanvasMouseMove(int canvasX, int canvasY) {
+    if (m_transformGizmoAxis >= 0 && m_selectedSceneObject >= 0 &&
+        m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
+        const int axis = m_transformGizmoAxis;
+        const float sx = static_cast<float>(m_transformGizmoEndX[axis] - m_transformGizmoCenterX);
+        const float sy = static_cast<float>(m_transformGizmoEndY[axis] - m_transformGizmoCenterY);
+        const float screenLength = std::sqrt(sx * sx + sy * sy);
+        if (screenLength > 1.0f) {
+            const float dx = static_cast<float>(canvasX - m_lastCanvasX);
+            const float dy = static_cast<float>(canvasY - m_lastCanvasY);
+            const float signedPixels = (dx * sx + dy * sy) / screenLength;
+            SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+            float* position[3] = { &object.position.x, &object.position.y, &object.position.z };
+            float* rotation[3] = { &object.rotation.x, &object.rotation.y, &object.rotation.z };
+            float* scale[3] = { &object.scale.x, &object.scale.y, &object.scale.z };
+            if (m_transformTool == TransformTool::Translate) {
+                *position[axis] += signedPixels * 0.012f;
+            } else if (m_transformTool == TransformTool::Rotate) {
+                *rotation[axis] += signedPixels * 0.8f;
+            } else {
+                *scale[axis] = std::clamp(*scale[axis] + signedPixels * 0.012f,
+                                          0.01f, 100.0f);
+            }
+        }
+        m_lastCanvasX = canvasX;
+        m_lastCanvasY = canvasY;
+        needsRerender = true;
+        return;
+    }
     if (m_lightDragActive) {
         const int dx = canvasX - m_lastCanvasX;
         const int dy = canvasY - m_lastCanvasY;
@@ -878,4 +1313,12 @@ void TestModule_3DRender::onCanvasMouseMove(int canvasX, int canvasY) {
         return;
     }
     onMouseMove(canvasX, canvasY);
+}
+
+void TestModule_3DRender::onKeyDown(int keycode) {
+    // Do not reinterpret flight keys while RMB is held.
+    if (m_rmbDown) return;
+    if (keycode == SDLK_w) m_transformTool = TransformTool::Translate;
+    if (keycode == SDLK_e) m_transformTool = TransformTool::Rotate;
+    if (keycode == SDLK_r) m_transformTool = TransformTool::Scale;
 }

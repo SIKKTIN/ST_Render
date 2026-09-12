@@ -490,6 +490,81 @@ int main(int argc, char* argv[]) {
             };
         }
 
+        if (command == "list_scene_objects" || command == "add_scene_object" ||
+            command == "select_scene_object" || command == "duplicate_scene_object" ||
+            command == "delete_scene_object" || command == "set_scene_object_transform") {
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+
+            if (command == "add_scene_object") {
+                const int modelIndex = params.value("modelIndex", -1);
+                if (!render3D->addModelToScene(modelIndex)) {
+                    throw std::runtime_error(render3D->getModelError().empty()
+                        ? "Model index was not found or failed to load"
+                        : render3D->getModelError());
+                }
+            } else if (command == "select_scene_object") {
+                if (!render3D->selectSceneObjectIndex(params.value("index", -1))) {
+                    throw std::runtime_error("Scene object index was not found");
+                }
+            } else if (command == "duplicate_scene_object") {
+                if (!render3D->duplicateSelectedObject()) {
+                    throw std::runtime_error("No scene object is selected");
+                }
+            } else if (command == "delete_scene_object") {
+                if (!render3D->deleteSelectedObject()) {
+                    throw std::runtime_error("No scene object is selected");
+                }
+            } else if (command == "set_scene_object_transform") {
+                const int objectIndex = params.value("index", render3D->getSelectedSceneObjectIndex());
+                ST::Vector3 positionValue, rotationValue, scaleValue;
+                const ST::Vector3* position = nullptr;
+                const ST::Vector3* rotation = nullptr;
+                const ST::Vector3* scale = nullptr;
+                auto parseVector = [&](const char* key, ST::Vector3& value, const ST::Vector3*& output) {
+                    if (!params.contains(key)) return;
+                    const auto& input = params[key];
+                    if (!input.is_array() || input.size() != 3) {
+                        throw std::runtime_error(std::string(key) + " must contain three numbers");
+                    }
+                    value = ST::Vector3(input[0].get<float>(), input[1].get<float>(), input[2].get<float>());
+                    output = &value;
+                };
+                parseVector("position", positionValue, position);
+                parseVector("rotation", rotationValue, rotation);
+                parseVector("scale", scaleValue, scale);
+                if (!position && !rotation && !scale) {
+                    throw std::runtime_error("Provide position, rotation, or scale");
+                }
+                if (!render3D->setSceneObjectTransform(objectIndex, position, rotation, scale)) {
+                    throw std::runtime_error("Scene object index was not found");
+                }
+            }
+
+            if (command != "list_scene_objects" && command != "select_scene_object") {
+                runModule(selectedModule);
+            }
+            ST::AppControlBridge::Json objects = ST::AppControlBridge::Json::array();
+            for (const auto& object : render3D->getSceneObjectInfos()) {
+                objects.push_back({
+                    { "id", object.id },
+                    { "name", object.name },
+                    { "modelIndex", object.modelIndex },
+                    { "modelPath", object.modelPath },
+                    { "position", { object.position.x, object.position.y, object.position.z } },
+                    { "rotation", { object.rotation.x, object.rotation.y, object.rotation.z } },
+                    { "scale", { object.scale.x, object.scale.y, object.scale.z } },
+                    { "visible", object.visible },
+                    { "selected", object.selected }
+                });
+            }
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "selectedObject", render3D->getSelectedSceneObjectIndex() },
+                { "objects", objects }
+            };
+        }
+
         if (command == "get_light" || command == "set_light") {
             auto* selected = selectedLeaf();
             auto* render3D = dynamic_cast<TestModule_3DRender*>(selected);

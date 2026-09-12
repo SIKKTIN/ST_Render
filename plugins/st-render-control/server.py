@@ -203,6 +203,57 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "list_scene_objects",
+        "title": "List 3D scene objects",
+        "description": "List model objects in the 3D Render scene, including transforms and selection.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "add_scene_object",
+        "title": "Add a 3D scene object",
+        "description": "Create a scene object from a model catalog index and select it.",
+        "inputSchema": {"type": "object", "properties": {"modelIndex": {"type": "integer", "minimum": 0}}, "required": ["modelIndex"], "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "select_scene_object",
+        "title": "Select a 3D scene object",
+        "description": "Select a scene object by its zero-based hierarchy index.",
+        "inputSchema": {"type": "object", "properties": {"index": {"type": "integer", "minimum": 0}}, "required": ["index"], "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "duplicate_scene_object",
+        "title": "Duplicate selected scene object",
+        "description": "Duplicate the selected scene object and offset the copy slightly.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "delete_scene_object",
+        "title": "Delete selected scene object",
+        "description": "Delete the currently selected scene object.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+    },
+    {
+        "name": "set_scene_object_transform",
+        "title": "Set a 3D scene object transform",
+        "description": "Set position, Euler rotation in degrees, and/or scale for a scene object.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "minimum": 0},
+                "position": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "rotation": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                "scale": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+            },
+            "additionalProperties": False
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "get_light",
         "title": "Read 3D Render light",
         "description": "Read the active direction light settings from 3D Render.",
@@ -343,6 +394,24 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "select_model":
         result = _send_app_command("select_model", arguments)
         return _text_result(f"Selected model index {result.get('selectedModel', '')}.", result)
+    if name == "list_scene_objects":
+        result = _send_app_command("list_scene_objects")
+        return _text_result(f"Found {len(result.get('objects', []))} scene objects.", result)
+    if name == "add_scene_object":
+        result = _send_app_command("add_scene_object", arguments)
+        return _text_result(f"Added scene object {result.get('selectedObject', '')}.", result)
+    if name == "select_scene_object":
+        result = _send_app_command("select_scene_object", arguments)
+        return _text_result(f"Selected scene object {result.get('selectedObject', '')}.", result)
+    if name == "duplicate_scene_object":
+        result = _send_app_command("duplicate_scene_object")
+        return _text_result(f"Duplicated scene object as {result.get('selectedObject', '')}.", result)
+    if name == "delete_scene_object":
+        result = _send_app_command("delete_scene_object")
+        return _text_result("Deleted the selected scene object.", result)
+    if name == "set_scene_object_transform":
+        result = _send_app_command("set_scene_object_transform", arguments)
+        return _text_result(f"Updated scene object {result.get('selectedObject', '')}.", result)
     if name == "get_light":
         result = _send_app_command("get_light")
         return _text_result("Read the active 3D Render light.", result)

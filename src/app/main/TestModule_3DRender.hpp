@@ -37,6 +37,7 @@ public:
     void update(float deltaTime) override;
     void render(void* canvasTexture, int canvasW, int canvasH) override;
     bool renderControls() override;
+    void renderCreatePanel() override;
     const std::vector<ST::ShaderEntry>& getShaderEntries() const { return m_shaderCatalog.getEntries(); }
     int getSelectedShaderIndex() const { return m_selectedShaderIndex; }
     const std::string& getShaderError() const { return m_shaderError; }
@@ -47,7 +48,28 @@ public:
     const std::string& getModelError() const { return m_modelError; }
     const std::string& getModelTextureStatus() const { return m_modelTextureStatus; }
     bool selectModelIndex(int index);
-    const ST::ModelAsset* getActiveModel() const { return m_modelLoaded ? &m_activeModel : nullptr; }
+    const ST::ModelAsset* getActiveModel() const;
+    struct SceneObjectInfo {
+        int id;
+        std::string name;
+        int modelIndex;
+        std::string modelPath;
+        ST::Vector3 position;
+        ST::Vector3 rotation;
+        ST::Vector3 scale;
+        bool visible;
+        bool selected;
+    };
+    std::vector<SceneObjectInfo> getSceneObjectInfos() const;
+    int getSelectedSceneObjectIndex() const { return m_selectedSceneObject; }
+    bool addModelToScene(int modelIndex) { return createSceneObject(modelIndex); }
+    bool selectSceneObjectIndex(int objectIndex);
+    bool duplicateSelectedObject();
+    bool deleteSelectedObject();
+    bool setSceneObjectTransform(int objectIndex,
+                                 const ST::Vector3* position,
+                                 const ST::Vector3* rotation,
+                                 const ST::Vector3* scale);
     const ST::Light& getLight() const { return m_light; }
     bool setLightDirection(const ST::Vector3& direction);
     void setLightIntensity(float intensity);
@@ -59,6 +81,7 @@ public:
     void onCanvasMouseUp(int button, int canvasX, int canvasY) override;
     void onCanvasMouseMove(int canvasX, int canvasY) override;
     void onWheel(float dx, float dy, int canvasX, int canvasY, int canvasW, int canvasH) override;
+    void onKeyDown(int keycode) override;
 
 private:
     void rebuildBuffers(int canvasW, int canvasH);
@@ -73,11 +96,24 @@ private:
     void scanModelCatalog();
     bool loadSelectedModel();
     bool renderModelControls();
+    bool renderSceneObjectControls();
+    bool createSceneObject(int modelIndex);
+    bool replaceSceneObjectModel(int objectIndex, int modelIndex);
+    void duplicateSelectedSceneObject();
+    void deleteSelectedSceneObject();
+    void selectSceneObject(int objectIndex);
+    ST::Matrix4x4 buildSceneObjectMatrix(int objectIndex) const;
+    void bindSceneObjectMaterial(int objectIndex);
     void drawLightGizmo(SDL_Renderer* renderer,
                         int canvasW, int canvasH,
                         const ST::Matrix4x4& view,
                         const ST::Matrix4x4& projection,
                         const ST::Matrix4x4& model);
+    void drawTransformGizmo(SDL_Renderer* renderer,
+                            int canvasW, int canvasH,
+                            const ST::Matrix4x4& view,
+                            const ST::Matrix4x4& projection,
+                            const ST::Matrix4x4& model);
     void syncLightAnglesFromDirection();
     void updateLightDirectionFromAngles();
 
@@ -99,15 +135,41 @@ private:
     float m_lightGizmoHitRadius = 24.0f;
     float m_lightYaw = 0.0f;
     float m_lightPitch = 0.0f;
+    enum class TransformTool { Translate, Rotate, Scale };
+    TransformTool m_transformTool = TransformTool::Translate;
+    bool m_showTransformGizmo = true;
+    int m_transformGizmoAxis = -1;
+    int m_transformGizmoCenterX = 0;
+    int m_transformGizmoCenterY = 0;
+    int m_transformGizmoEndX[3] = { 0, 0, 0 };
+    int m_transformGizmoEndY[3] = { 0, 0, 0 };
+    bool m_transformGizmoValid = false;
+
+    struct SceneObject {
+        int id = 0;
+        std::string name;
+        int modelIndex = -1;
+        std::string modelPath;
+        std::shared_ptr<ST::ModelAsset> model;
+        ST::Image diffuseTexture;
+        ST::Material material = ST::Material::defaultMaterial();
+        std::string textureStatus;
+        ST::Vector3 position = ST::Vector3::zero();
+        ST::Vector3 rotation = ST::Vector3::zero();
+        ST::Vector3 scale = ST::Vector3(1.0f, 1.0f, 1.0f);
+        bool visible = true;
+    };
 
     ST::Mesh m_cube;
-    ST::ModelAsset m_activeModel;
+    std::vector<SceneObject> m_sceneObjects;
+    int m_selectedSceneObject = -1;
+    int m_nextSceneObjectId = 1;
+    int m_addModelIndex = -1;
     bool m_modelLoaded = false;
     ST::ModelCatalog m_modelCatalog;
     int m_selectedModelIndex = -1;
     std::string m_modelError;
     std::string m_modelRoot = "Data/Models";
-    ST::Image m_modelDiffuseTexture;
     std::string m_modelTextureStatus;
     ST::ShaderCatalog m_shaderCatalog;
     ST::ShaderManager m_shaderManager;

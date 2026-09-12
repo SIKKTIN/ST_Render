@@ -50,11 +50,34 @@ try:
         if module.get("category") == "Test Components"
     ]
     assert {module["name"] for module in test_components} == {
-        "FrameBuffer Test", "Rasterizer Test", "Texture Test"
+        "FrameBuffer Test", "Rasterizer Test", "Texture Test", "Shader Test"
     }, test_components
 
     selected = request("tools/call", {"name": "select_module", "arguments": {"name": "3D Render"}})
     assert selected["structuredContent"]["selectedModule"] == "3D Render", selected
+
+    models = request("tools/call", {"name": "list_models", "arguments": {}})
+    model_entries = models["structuredContent"]["models"]
+    assert model_entries, models
+
+    scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
+    assert len(scene["structuredContent"]["objects"]) == 1, scene
+
+    added = request("tools/call", {
+        "name": "add_scene_object",
+        "arguments": {"modelIndex": model_entries[min(1, len(model_entries) - 1)]["index"]},
+    })
+    assert len(added["structuredContent"]["objects"]) == 2, added
+    moved = request("tools/call", {
+        "name": "set_scene_object_transform",
+        "arguments": {"position": [-1.5, 0.0, 0.0], "rotation": [0.0, 25.0, 0.0]},
+    })
+    assert moved["structuredContent"]["objects"][1]["position"] == [-1.5, 0.0, 0.0], moved
+
+    duplicated = request("tools/call", {"name": "duplicate_scene_object", "arguments": {}})
+    assert len(duplicated["structuredContent"]["objects"]) == 3, duplicated
+    deleted = request("tools/call", {"name": "delete_scene_object", "arguments": {}})
+    assert len(deleted["structuredContent"]["objects"]) == 2, deleted
 
     captured = request("tools/call", {"name": "capture_canvas", "arguments": {}})
     assert any(item.get("type") == "image" for item in captured["content"]), captured

@@ -37,6 +37,10 @@ assert initialized["result"]["serverInfo"]["name"] == "st-render-control"
 tools = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
 tool_names = {tool["name"] for tool in tools["result"]["tools"]}
 assert {"launch_app", "list_modules", "select_module", "capture_canvas", "run_render_dump"} <= tool_names
+assert {
+    "list_scene_objects", "add_scene_object", "select_scene_object",
+    "duplicate_scene_object", "delete_scene_object", "set_scene_object_transform",
+} <= tool_names
 
 process.stdin.close()
 process.wait(timeout=5)
