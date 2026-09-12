@@ -405,6 +405,29 @@ void TestModule_3DRender::setLightIntensity(float intensity) {
     needsRerender = true;
 }
 
+TestModule_3DRender::EditorSettings TestModule_3DRender::getEditorSettings() const {
+    EditorSettings settings;
+    settings.supersampleEnabled = m_supersampleEnabled;
+    settings.flatShading = m_flatShading;
+    settings.showLightGizmo = m_showLightGizmo;
+    settings.showTransformGizmo = m_showTransformGizmo;
+    settings.showSelectionOutline = m_showSelectionOutline;
+    settings.cameraSpeed = m_moveSpeed;
+    settings.cameraSensitivity = m_cameraSensitivity;
+    return settings;
+}
+
+void TestModule_3DRender::applyEditorSettings(const EditorSettings& settings) {
+    m_supersampleEnabled = settings.supersampleEnabled;
+    m_flatShading = settings.flatShading;
+    m_showLightGizmo = settings.showLightGizmo;
+    m_showTransformGizmo = settings.showTransformGizmo;
+    m_showSelectionOutline = settings.showSelectionOutline;
+    m_moveSpeed = std::clamp(settings.cameraSpeed, m_moveSpeedMin, m_moveSpeedMax);
+    m_cameraSensitivity = std::clamp(settings.cameraSensitivity, 0.001f, 0.1f);
+    needsRerender = true;
+}
+
 ST::Matrix4x4 TestModule_3DRender::buildSceneObjectMatrix(int objectIndex) const {
     if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) {
         return ST::Matrix4x4::identity();
@@ -973,7 +996,7 @@ void TestModule_3DRender::drawSelectionOutline(SDL_Renderer* renderer,
                                                const ST::Matrix4x4& view,
                                                const ST::Matrix4x4& projection,
                                                const ST::Matrix4x4& model) {
-    if (!renderer || m_selectedSceneObject < 0 ||
+    if (!renderer || !m_showSelectionOutline || m_selectedSceneObject < 0 ||
         m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
     const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
     if (!object.visible || !object.model) return;
@@ -1301,7 +1324,7 @@ void TestModule_3DRender::onMouseMove(int x, int y) {
     m_lastCanvasX = x;
     m_lastCanvasY = y;
 
-    const float sens = 0.01f;
+    const float sens = m_cameraSensitivity;
     m_yaw -= dx * sens;
     if (m_lmbDown) {
         // LMB keeps the existing pitch orientation.

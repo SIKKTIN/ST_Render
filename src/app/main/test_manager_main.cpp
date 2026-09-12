@@ -6,9 +6,11 @@
 #include <cstring>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <algorithm>
 #include <iterator>
+#include <nlohmann/json.hpp>
 
 #include "imgui_impl_sdl2.h"
 #include "imgui_impl_sdlrenderer2.h"
@@ -60,6 +62,12 @@ struct RenderSettings {
     int height = 480;
 };
 
+struct EditorPreferences {
+    int resolutionIndex = 0;
+    int theme = 0; // 0 = dark, 1 = light
+    TestModule_3DRender::EditorSettings render;
+};
+
 int main(int argc, char* argv[]) {
     std::cout << "=== ST Render - Test Manager ===" << std::endl;
 
@@ -91,6 +99,38 @@ int main(int argc, char* argv[]) {
     int currentResolutionIndex = 0;
     int pendingResolutionIndex = 0;
     bool settingsOpen = false;
+    EditorPreferences editorPreferences;
+    EditorPreferences pendingPreferences;
+    const std::filesystem::path editorPreferencesPath = "Data/EditorSettings.json";
+
+    // Editor preferences are intentionally separate from scene data. A
+    // missing or partially invalid file falls back to safe defaults.
+    try {
+        std::ifstream input(editorPreferencesPath);
+        if (input) {
+            nlohmann::json saved;
+            input >> saved;
+            editorPreferences.resolutionIndex = std::clamp(
+                saved.value("resolutionIndex", 0), 0,
+                static_cast<int>(std::size(kRenderResolutions)) - 1);
+            editorPreferences.theme = std::clamp(saved.value("theme", 0), 0, 1);
+            const auto& render = saved.value("render", nlohmann::json::object());
+            editorPreferences.render.supersampleEnabled = render.value("supersample", true);
+            editorPreferences.render.flatShading = render.value("flatShading", false);
+            editorPreferences.render.showLightGizmo = render.value("showLightGizmo", true);
+            editorPreferences.render.showTransformGizmo = render.value("showTransformGizmo", true);
+            editorPreferences.render.showSelectionOutline = render.value("showSelectionOutline", true);
+            editorPreferences.render.cameraSpeed = std::clamp(render.value("cameraSpeed", 2.5f), 0.25f, 20.0f);
+            editorPreferences.render.cameraSensitivity = std::clamp(render.value("cameraSensitivity", 0.01f), 0.001f, 0.1f);
+        }
+    } catch (const std::exception& error) {
+        std::cerr << "Editor settings ignored: " << error.what() << std::endl;
+        editorPreferences = EditorPreferences{};
+    }
+    currentResolutionIndex = editorPreferences.resolutionIndex;
+    pendingResolutionIndex = currentResolutionIndex;
+    renderSettings.width = kRenderResolutions[currentResolutionIndex].width;
+    renderSettings.height = kRenderResolutions[currentResolutionIndex].height;
 
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
     if (!renderer) {
@@ -286,6 +326,32 @@ int main(int argc, char* argv[]) {
         runModule(selectedModule);
         return true;
     };
+    auto saveEditorPreferences = [&]() {
+        try {
+            std::filesystem::create_directories(editorPreferencesPath.parent_path());
+            nlohmann::json saved = {
+                { "version", 1 },
+                { "resolutionIndex", editorPreferences.resolutionIndex },
+                { "theme", editorPreferences.theme },
+                { "render", {
+                    { "supersample", editorPreferences.render.supersampleEnabled },
+                    { "flatShading", editorPreferences.render.flatShading },
+                    { "showLightGizmo", editorPreferences.render.showLightGizmo },
+                    { "showTransformGizmo", editorPreferences.render.showTransformGizmo },
+                    { "showSelectionOutline", editorPreferences.render.showSelectionOutline },
+                    { "cameraSpeed", editorPreferences.render.cameraSpeed },
+                    { "cameraSensitivity", editorPreferences.render.cameraSensitivity }
+                } }
+            };
+            std::ofstream output(editorPreferencesPath);
+            output << saved.dump(2) << '\n';
+        } catch (const std::exception& error) {
+            std::cerr << "Unable to save editor settings: " << error.what() << std::endl;
+        }
+    };
+    if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+        render3D->applyEditorSettings(editorPreferences.render);
+    }
     runModule(selectedModule);
 
     IMGUI_CHECKVERSION();
@@ -312,7 +378,8 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    Theme currentTheme = Theme::Dark;
+    Theme currentTheme = editorPreferences.theme == 1 ? Theme::Light : Theme::Dark;
+    int pendingTheme = editorPreferences.theme;
     applyTheme(currentTheme);
 
     ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
@@ -405,7 +472,9 @@ int main(int argc, char* argv[]) {
             renderSettings.height = kRenderResolutions[preset].height;
             currentResolutionIndex = preset;
             pendingResolutionIndex = preset;
+            editorPreferences.resolutionIndex = preset;
             if (!recreateCanvas()) throw std::runtime_error("Failed to recreate render canvas");
+            saveEditorPreferences();
             controlBridge.updateState(buildControlState(), true);
             return buildControlState();
         }
@@ -850,6 +919,11 @@ int main(int argc, char* argv[]) {
             if (ImGui::BeginMenu("Edit")) {
                 if (ImGui::MenuItem("Settings...")) {
                     pendingResolutionIndex = currentResolutionIndex;
+                    pendingPreferences = editorPreferences;
+                    if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+                        pendingPreferences.render = render3D->getEditorSettings();
+                    }
+                    pendingTheme = currentTheme == Theme::Light ? 1 : 0;
                     settingsOpen = true;
                 }
                 ImGui::Separator();
@@ -884,34 +958,84 @@ int main(int argc, char* argv[]) {
         }
 
         if (settingsOpen) {
-            ImGui::SetNextWindowSize(ImVec2(420.0f, 220.0f), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(560.0f, 430.0f), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Settings", &settingsOpen)) {
-                ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Render Settings");
-                ImGui::Separator();
-                const char* resolutionLabels[] = {
-                    kRenderResolutions[0].label,
-                    kRenderResolutions[1].label,
-                    kRenderResolutions[2].label,
-                    kRenderResolutions[3].label
-                };
-                ImGui::Combo("Render resolution", &pendingResolutionIndex,
-                             resolutionLabels, IM_ARRAYSIZE(resolutionLabels));
-                ImGui::TextDisabled("Canvas keeps this aspect ratio while the window and panels resize.");
-                ImGui::Text("Active: %d x %d", renderSettings.width, renderSettings.height);
+                if (ImGui::BeginTabBar("SettingsTabs")) {
+                    if (ImGui::BeginTabItem("Render")) {
+                        ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Render Target");
+                        ImGui::Separator();
+                        const char* resolutionLabels[] = {
+                            kRenderResolutions[0].label,
+                            kRenderResolutions[1].label,
+                            kRenderResolutions[2].label,
+                            kRenderResolutions[3].label
+                        };
+                        ImGui::Combo("Resolution", &pendingPreferences.resolutionIndex,
+                                     resolutionLabels, IM_ARRAYSIZE(resolutionLabels));
+                        ImGui::TextDisabled("Canvas keeps this aspect ratio while panels resize.");
+                        ImGui::Checkbox("2x final supersampling", &pendingPreferences.render.supersampleEnabled);
+                        ImGui::Checkbox("Flat shading", &pendingPreferences.render.flatShading);
+                        ImGui::Checkbox("Show light gizmo", &pendingPreferences.render.showLightGizmo);
+                        ImGui::Checkbox("Show transform gizmo", &pendingPreferences.render.showTransformGizmo);
+                        ImGui::Checkbox("Show selection outline", &pendingPreferences.render.showSelectionOutline);
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Interaction")) {
+                        ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Camera Input");
+                        ImGui::Separator();
+                        ImGui::SliderFloat("Camera speed", &pendingPreferences.render.cameraSpeed,
+                                           0.25f, 20.0f, "%.2f u/s");
+                        ImGui::SliderFloat("Look sensitivity", &pendingPreferences.render.cameraSensitivity,
+                                           0.001f, 0.1f, "%.3f");
+                        ImGui::TextDisabled("W/E/R switches transform tools; F focuses the selected object.");
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Appearance")) {
+                        ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Editor Theme");
+                        ImGui::Separator();
+                        ImGui::RadioButton("Dark", &pendingTheme, 0);
+                        ImGui::SameLine();
+                        ImGui::RadioButton("Light", &pendingTheme, 1);
+                        ImGui::TextDisabled("Theme changes are applied when you press Apply.");
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
                 ImGui::Separator();
                 if (ImGui::Button("Apply")) {
-                    const auto& choice = kRenderResolutions[pendingResolutionIndex];
+                    const EditorPreferences oldPreferences = editorPreferences;
+                    const Theme oldTheme = currentTheme;
                     const int oldWidth = renderSettings.width;
                     const int oldHeight = renderSettings.height;
+                    editorPreferences = pendingPreferences;
+                    currentTheme = pendingTheme == 1 ? Theme::Light : Theme::Dark;
+                    applyTheme(currentTheme);
+                    if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+                        render3D->applyEditorSettings(editorPreferences.render);
+                    }
+                    const auto& choice = kRenderResolutions[editorPreferences.resolutionIndex];
                     renderSettings.width = choice.width;
                     renderSettings.height = choice.height;
                     if (recreateCanvas()) {
-                        currentResolutionIndex = pendingResolutionIndex;
+                        currentResolutionIndex = editorPreferences.resolutionIndex;
+                        pendingResolutionIndex = currentResolutionIndex;
+                        saveEditorPreferences();
                         settingsOpen = false;
                     } else {
+                        editorPreferences = oldPreferences;
+                        currentTheme = oldTheme;
+                        applyTheme(currentTheme);
+                        if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+                            render3D->applyEditorSettings(editorPreferences.render);
+                        }
                         renderSettings.width = oldWidth;
                         renderSettings.height = oldHeight;
                     }
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Reset defaults")) {
+                    pendingPreferences = EditorPreferences{};
+                    pendingTheme = 0;
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("Cancel")) settingsOpen = false;

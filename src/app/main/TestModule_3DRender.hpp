@@ -73,6 +73,17 @@ public:
     const ST::Light& getLight() const { return m_light; }
     bool setLightDirection(const ST::Vector3& direction);
     void setLightIntensity(float intensity);
+    struct EditorSettings {
+        bool supersampleEnabled = true;
+        bool flatShading = false;
+        bool showLightGizmo = true;
+        bool showTransformGizmo = true;
+        bool showSelectionOutline = true;
+        float cameraSpeed = 2.5f;
+        float cameraSensitivity = 0.01f;
+    };
+    EditorSettings getEditorSettings() const;
+    void applyEditorSettings(const EditorSettings& settings);
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
@@ -145,6 +156,7 @@ private:
     enum class TransformTool { Translate, Rotate, Scale };
     TransformTool m_transformTool = TransformTool::Translate;
     bool m_showTransformGizmo = true;
+    bool m_showSelectionOutline = true;
     int m_transformGizmoAxis = -1;
     int m_transformGizmoCenterX = 0;
     int m_transformGizmoCenterY = 0;
@@ -198,6 +210,7 @@ private:
     float m_moveSpeed;    // WASD units/sec
     float m_moveSpeedMin;
     float m_moveSpeedMax;
+    float m_cameraSensitivity = 0.01f;
     bool  m_lmbDown;
     bool  m_rmbDown;
     bool m_interactionActive = false;
