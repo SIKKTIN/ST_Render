@@ -22,6 +22,10 @@ namespace ST {
         , m_hasNormalTexture(false) {
         m_material = Material::defaultMaterial();
         m_viewPosition = Vector3(0, 0, 5);
+		m_environmentColor = Vector3(0.16f, 0.2f, 0.28f);
+		m_environmentIntensity = 0.35f;
+		m_toneMappingEnabled = true;
+		m_exposure = 1.0f;
     }
 
 	void FragmentShader::setMaterial(const Material& mat) {
@@ -43,6 +47,16 @@ namespace ST {
 
 	void FragmentShader::setAmbient(const Vector3& ambient) {
 		m_ambient = ambient;
+	}
+
+	void FragmentShader::setEnvironment(const Vector3& color, float intensity) {
+		m_environmentColor = color;
+		m_environmentIntensity = std::max(0.0f, intensity);
+	}
+
+	void FragmentShader::setToneMapping(bool enabled, float exposure) {
+		m_toneMappingEnabled = enabled;
+		m_exposure = std::max(0.0f, exposure);
 	}
 
 	void FragmentShader::setTexture(const std::vector<Color>& texture, int width, int height) {
@@ -268,7 +282,9 @@ namespace ST {
         return Color(saturate(result), texColor.a);
     }
 
-	// Blinn-Phong - Uses half-vector instead of reflection vector
+	// Metallic-roughness PBR using GGX distribution, Smith visibility and
+	// Schlick Fresnel. The public entry point keeps its historical name so
+	// existing built-in shader selection remains compatible.
 	Color FragmentShader::shadeBlinnPhong(const Fragment& fragment) {
 		Vector3 viewDir = (m_viewPosition - fragment.worldPosition).normalized();
 		Vector3 shadingNormal = fragment.normal.normalized();
@@ -278,23 +294,35 @@ namespace ST {
 			const Vector3 tangent = fragment.tangent.normalized();
 			const Vector3 bitangent = shadingNormal.cross(tangent).normalized();
 			const float normalStrength = std::max(0.0f, m_material.normalStrength);
+			// The editor's repository sample uses Poly Haven's DirectX normal
+			// convention, so invert the green channel into our OpenGL-style basis.
 			const Vector3 tangentNormal((normalSample.r * 2.0f - 1.0f) * normalStrength,
-				(normalSample.g * 2.0f - 1.0f) * normalStrength,
+				(1.0f - normalSample.g * 2.0f) * normalStrength,
 				normalSample.b * 2.0f - 1.0f);
 			shadingNormal = (tangent * tangentNormal.x + bitangent * tangentNormal.y +
 				shadingNormal * tangentNormal.z).normalized();
 		}
-		Vector3 totalLight = m_ambient * m_material.ambient;
+		Color texColor = m_hasTexture ? sampleTexture(fragment.texCoord) : fragment.color;
+		const Vector3 baseColor = m_material.diffuse * Vector3(texColor.r, texColor.g, texColor.b);
 		const float metallicMap = sampleScalarMap(m_metallicTexture, m_metallicTextureWidth,
 			m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture);
 		const float roughnessMap = sampleScalarMap(m_roughnessTexture, m_roughnessTextureWidth,
 			m_roughnessTextureHeight, fragment.texCoord, m_hasRoughnessTexture);
 		const float metallic = clamp(m_material.metallicFactor * metallicMap, 0.0f, 1.0f);
 		const float roughness = clamp(m_material.roughness * roughnessMap, 0.02f, 1.0f);
-		const float specularPower = std::max(1.0f,
-			(1.0f - roughness) * (1.0f - roughness) * 256.0f);
-		const Vector3 specularColor =
-			m_material.specular * (1.0f - metallic) + m_material.diffuse * metallic;
+		const float pi = 3.14159265359f;
+		const float alpha = roughness * roughness;
+		const float alphaSquared = alpha * alpha;
+		const Vector3 dielectricF0 = m_material.specular * 0.08f;
+		const Vector3 f0 = dielectricF0 * (1.0f - metallic) + baseColor * metallic;
+		const float nDotV = std::max(0.0f, shadingNormal.dot(viewDir));
+		// There is no image-based environment light yet. Keep a small ambient
+		// specular term so fully metallic materials remain readable in the
+		// directional-light-only editor viewport.
+		const Vector3 environment = m_environmentColor * m_environmentIntensity;
+		Vector3 totalLight = m_ambient * m_material.ambient *
+			(baseColor * (1.0f - metallic) + f0 * 0.8f) +
+			environment * (baseColor * (1.0f - metallic) + f0);
 
 		for (const auto& light : m_lights) {
 			Vector3 lightDir;
@@ -309,23 +337,43 @@ namespace ST {
 				attenuation = 1.0f / (1.0f + light.attenuation * distance * distance);
 			}
 
-			float diff = std::max(0.0f, shadingNormal.dot(lightDir));
-			Vector3 diffuse = m_material.diffuse * (diff * (1.0f - metallic)) *
-				light.color.rgb * light.intensity * attenuation;
-
-			// Blinn-Phong: use half-vector
+			const float nDotL = std::max(0.0f, shadingNormal.dot(lightDir));
+			if (nDotL <= 0.0f || nDotV <= 0.0f) continue;
 			Vector3 halfDir = (lightDir + viewDir).normalized();
-			float spec = std::pow(std::max(0.0f, shadingNormal.dot(halfDir)), specularPower);
-			Vector3 specular = specularColor * spec * light.color.rgb * light.intensity * attenuation;
-
-			totalLight = totalLight + diffuse + specular;
+			const float nDotH = std::max(0.0f, shadingNormal.dot(halfDir));
+			const float vDotH = std::max(0.0f, viewDir.dot(halfDir));
+			const float denominator = nDotH * nDotH * (alphaSquared - 1.0f) + 1.0f;
+			const float distribution = alphaSquared / (pi * denominator * denominator);
+			const float k = (roughness + 1.0f) * (roughness + 1.0f) / 8.0f;
+			const float geometryV = nDotV / (nDotV * (1.0f - k) + k);
+			const float geometryL = nDotL / (nDotL * (1.0f - k) + k);
+			const float geometry = geometryV * geometryL;
+			const float fresnelFactor = std::pow(1.0f - vDotH, 5.0f);
+			const Vector3 fresnel = f0 + (Vector3(1.0f, 1.0f, 1.0f) - f0) * fresnelFactor;
+			const Vector3 specular = fresnel * (distribution * geometry /
+				std::max(0.0001f, 4.0f * nDotV * nDotL));
+			const Vector3 diffuse = baseColor * ((1.0f - metallic) / pi) *
+				(Vector3(1.0f, 1.0f, 1.0f) - fresnel);
+			const Vector3 lightColor(light.color.r, light.color.g, light.color.b);
+			const Vector3 radiance = lightColor * light.intensity * attenuation;
+			totalLight = totalLight + (diffuse + specular) * radiance * nDotL;
 		}
 
-		Color texColor = m_hasTexture ? sampleTexture(fragment.texCoord) : fragment.color;
-		Vector3 result = Vector3(totalLight.x * texColor.r,
-			totalLight.y * texColor.g,
-			totalLight.z * texColor.b);
-		result = result + m_material.emission;
+		Vector3 result = totalLight + m_material.emission;
+		if (m_toneMappingEnabled) {
+			const Vector3 exposed = result * m_exposure;
+			// Exponential filmic approximation followed by sRGB-like gamma.
+			result = Vector3(
+				1.0f - std::exp(-std::max(0.0f, exposed.x)),
+				1.0f - std::exp(-std::max(0.0f, exposed.y)),
+				1.0f - std::exp(-std::max(0.0f, exposed.z))
+			);
+			result = Vector3(
+				std::pow(std::max(0.0f, result.x), 1.0f / 2.2f),
+				std::pow(std::max(0.0f, result.y), 1.0f / 2.2f),
+				std::pow(std::max(0.0f, result.z), 1.0f / 2.2f)
+			);
+		}
 
 		return Color(saturate(result), texColor.a);
 	}

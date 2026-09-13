@@ -588,6 +588,10 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
         { "lighting", {
             { "enabled", m_lightingEnabled },
             { "ambient", vectorJson(m_ambientLight) },
+            { "environmentColor", vectorJson(m_environmentColor) },
+            { "environmentIntensity", m_environmentIntensity },
+            { "toneMapping", m_toneMappingEnabled },
+            { "exposure", m_exposure },
             { "direction", vectorJson(m_light.direction) },
             { "color", colorJson(m_light.color) },
             { "intensity", m_light.intensity }
@@ -815,6 +819,10 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
             const Json& lighting = scene["lighting"];
             m_lightingEnabled = lighting.value("enabled", m_lightingEnabled);
             if (lighting.contains("ambient")) m_ambientLight = readVector(lighting["ambient"], "ambient");
+            if (lighting.contains("environmentColor")) m_environmentColor = readVector(lighting["environmentColor"], "environment color");
+            m_environmentIntensity = std::clamp(lighting.value("environmentIntensity", m_environmentIntensity), 0.0f, 5.0f);
+            m_toneMappingEnabled = lighting.value("toneMapping", m_toneMappingEnabled);
+            m_exposure = std::clamp(lighting.value("exposure", m_exposure), 0.0f, 5.0f);
             if (lighting.contains("direction")) setLightDirection(readVector(lighting["direction"], "light direction"));
             if (lighting.contains("color")) m_light.color = readColor(lighting["color"], "light color");
             m_light.intensity = std::clamp(lighting.value("intensity", m_light.intensity), 0.0f, 5.0f);
@@ -1204,6 +1212,8 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
 
     m_fragmentShader.setViewPosition(eye);
     m_fragmentShader.setAmbient(m_ambientLight);
+    m_fragmentShader.setEnvironment(m_environmentColor, m_environmentIntensity);
+    m_fragmentShader.setToneMapping(m_toneMappingEnabled, m_exposure);
     m_fragmentShader.clearLights();
     if (m_lightingEnabled) m_fragmentShader.addLight(m_light);
 
@@ -1292,7 +1302,7 @@ bool TestModule_3DRender::renderControls() {
     ImGui::BulletText("Shift = sprint, Wheel = change speed.");
 
     ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Lighting (Blinn-Phong)");
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Lighting (GGX PBR)");
     ImGui::Separator();
     changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
     changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
@@ -1412,6 +1422,10 @@ bool TestModule_3DRender::renderControls() {
     changed |= ImGui::ColorEdit3("Specular", &editedMaterial->specular.x);
     changed |= ImGui::SliderFloat("Legacy shininess", &editedMaterial->shininess, 1.0f, 256.0f);
     changed |= ImGui::ColorEdit3("Ambient light", &m_ambientLight.x);
+    changed |= ImGui::ColorEdit3("Environment color", &m_environmentColor.x);
+    changed |= ImGui::SliderFloat("Environment intensity", &m_environmentIntensity, 0.0f, 5.0f);
+    changed |= ImGui::Checkbox("Tone mapping", &m_toneMappingEnabled);
+    changed |= ImGui::SliderFloat("Exposure", &m_exposure, 0.0f, 5.0f);
     if (ImGui::Button("Reset Light")) {
         m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
         m_light.color = ST::Color::white();

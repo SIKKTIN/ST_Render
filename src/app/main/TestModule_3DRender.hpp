@@ -157,6 +157,10 @@ private:
     ST::Material m_material;
     ST::Light m_light;
     ST::Vector3 m_ambientLight;
+    ST::Vector3 m_environmentColor = ST::Vector3(0.16f, 0.2f, 0.28f);
+    float m_environmentIntensity = 0.35f;
+    bool m_toneMappingEnabled = true;
+    float m_exposure = 1.0f;
     bool m_lightingEnabled;
     bool m_flatShading = false;
     bool m_supersampleEnabled = true;

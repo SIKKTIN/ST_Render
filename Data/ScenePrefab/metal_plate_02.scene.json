@@ -10,6 +10,10 @@
   "lighting": {
     "enabled": true,
     "ambient": [0.12, 0.12, 0.12],
+    "environmentColor": [0.16, 0.2, 0.28],
+    "environmentIntensity": 0.35,
+    "toneMapping": true,
+    "exposure": 1.2,
     "direction": [-0.3244, -0.8111, -0.4867],
     "color": [1.0, 1.0, 1.0, 1.0],
     "intensity": 1.4

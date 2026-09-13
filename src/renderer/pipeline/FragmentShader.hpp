@@ -100,6 +100,8 @@ namespace ST {
 		void clearLights();
 
 		void setAmbient(const Vector3& ambient);
+		void setEnvironment(const Vector3& color, float intensity);
+		void setToneMapping(bool enabled, float exposure);
 		void setViewPosition(const Vector3& position) { m_viewPosition = position; }
 		const Vector3& getViewPosition() const { return m_viewPosition; }
 
@@ -121,6 +123,10 @@ namespace ST {
 		Material m_material;
 		std::vector<Light> m_lights;
 		Vector3 m_ambient;
+		Vector3 m_environmentColor;
+		float m_environmentIntensity;
+		bool m_toneMappingEnabled;
+		float m_exposure;
 		Vector3 m_viewPosition;
 
 		std::vector<Color> m_texture;
