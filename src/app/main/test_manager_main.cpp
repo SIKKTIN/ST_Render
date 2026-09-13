@@ -119,6 +119,7 @@ int main(int argc, char* argv[]) {
                 static_cast<int>(std::size(kRenderResolutions)) - 1);
             editorPreferences.theme = std::clamp(saved.value("theme", 0), 0, 1);
             const auto& render = saved.value("render", nlohmann::json::object());
+            editorPreferences.render.renderQuality = std::clamp(render.value("quality", 0), 0, 2);
             editorPreferences.render.supersampleEnabled = render.value("supersample", true);
             editorPreferences.render.flatShading = render.value("flatShading", false);
             editorPreferences.render.showLightGizmo = render.value("showLightGizmo", true);
@@ -345,6 +346,7 @@ int main(int argc, char* argv[]) {
                 { "resolutionIndex", editorPreferences.resolutionIndex },
                 { "theme", editorPreferences.theme },
                 { "render", {
+                    { "quality", editorPreferences.render.renderQuality },
                     { "supersample", editorPreferences.render.supersampleEnabled },
                     { "flatShading", editorPreferences.render.flatShading },
                     { "showLightGizmo", editorPreferences.render.showLightGizmo },
@@ -1129,6 +1131,10 @@ int main(int argc, char* argv[]) {
                         ImGui::Combo("Resolution", &pendingPreferences.resolutionIndex,
                                      resolutionLabels, IM_ARRAYSIZE(resolutionLabels));
                         ImGui::TextDisabled("Canvas keeps this aspect ratio while panels resize.");
+                        const char* qualityLabels[] = { "Adaptive", "Preview", "Final" };
+                        ImGui::Combo("Render quality", &pendingPreferences.render.renderQuality,
+                                     qualityLabels, IM_ARRAYSIZE(qualityLabels));
+                        ImGui::TextDisabled("Preview favors interaction speed; Final keeps full PBR quality.");
                         ImGui::Checkbox("2x final supersampling", &pendingPreferences.render.supersampleEnabled);
                         ImGui::Checkbox("Flat shading", &pendingPreferences.render.flatShading);
                         ImGui::Checkbox("Show light gizmo", &pendingPreferences.render.showLightGizmo);

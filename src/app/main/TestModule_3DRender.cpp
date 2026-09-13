@@ -551,6 +551,7 @@ void TestModule_3DRender::setLightIntensity(float intensity) {
 
 TestModule_3DRender::EditorSettings TestModule_3DRender::getEditorSettings() const {
     EditorSettings settings;
+    settings.renderQuality = m_renderQuality;
     settings.supersampleEnabled = m_supersampleEnabled;
     settings.flatShading = m_flatShading;
     settings.showLightGizmo = m_showLightGizmo;
@@ -562,6 +563,7 @@ TestModule_3DRender::EditorSettings TestModule_3DRender::getEditorSettings() con
 }
 
 void TestModule_3DRender::applyEditorSettings(const EditorSettings& settings) {
+    m_renderQuality = std::clamp(settings.renderQuality, 0, 2);
     m_supersampleEnabled = settings.supersampleEnabled;
     m_flatShading = settings.flatShading;
     m_showLightGizmo = settings.showLightGizmo;
@@ -1182,11 +1184,17 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // rasterizer. Keep the explicit supersampling option, but adapt it to 1x
     // while the environment map is active so the viewport remains usable.
     const bool heavyPbr = m_environmentMapEnabled && m_environmentTexture.isValid();
-    const int qualityScale = (!m_interactionActive && m_supersampleEnabled && !heavyPbr) ? 2 : 1;
-    const int renderW = m_interactionActive
+    const bool previewQuality = m_renderQuality == 1;
+    const bool finalQuality = m_renderQuality == 2;
+    const bool reducedQuality = previewQuality || (m_interactionActive && !finalQuality);
+    const bool interactionPreview = m_interactionActive && !finalQuality;
+    const int qualityScale = finalQuality
+        ? (m_supersampleEnabled ? 2 : 1)
+        : ((!m_interactionActive && m_supersampleEnabled && !heavyPbr && !previewQuality) ? 2 : 1);
+    const int renderW = interactionPreview
         ? std::max(1, canvasW / 2)
         : canvasW * qualityScale;
-    const int renderH = m_interactionActive
+    const int renderH = interactionPreview
         ? std::max(1, canvasH / 2)
         : canvasH * qualityScale;
 
@@ -1232,11 +1240,11 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     m_fragmentShader.setViewPosition(eye);
     m_fragmentShader.setAmbient(m_ambientLight);
     m_fragmentShader.setEnvironment(m_environmentColor, m_environmentIntensity);
-    m_fragmentShader.setReducedQuality(m_interactionActive);
+    m_fragmentShader.setReducedQuality(reducedQuality);
     // Environment lookup performs trigonometric projection per fragment. Keep
     // interaction responsive by using the cheap constant environment while
     // the camera/gizmo is being dragged; restore reflections on release.
-    if (m_environmentMapEnabled && m_environmentTexture.isValid() && !m_interactionActive) {
+    if (m_environmentMapEnabled && m_environmentTexture.isValid() && !reducedQuality) {
         m_fragmentShader.setEnvironmentTexture(m_environmentTexture.getPixels(),
                                                m_environmentTexture.getWidth(),
                                                m_environmentTexture.getHeight());
@@ -1345,11 +1353,18 @@ bool TestModule_3DRender::renderControls() {
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Off: interpolate vertex normals (smooth)\nOn: use one geometric normal per triangle");
         }
+        const char* qualityLabels[] = { "Adaptive", "Preview", "Final" };
+        changed |= ImGui::Combo("Render quality", &m_renderQuality,
+                                qualityLabels, IM_ARRAYSIZE(qualityLabels));
         changed |= ImGui::Checkbox("2x final supersampling", &m_supersampleEnabled);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Environment-map PBR automatically uses 1x to keep the software renderer responsive.");
         }
-        if (m_environmentMapEnabled && m_environmentTexture.isValid() && m_supersampleEnabled) {
+        if (m_renderQuality == 1) {
+            ImGui::TextDisabled("Preview: 1x, reduced material sampling, no environment reflection");
+        } else if (m_renderQuality == 2) {
+            ImGui::TextDisabled("Final: full material sampling; supersampling follows the checkbox");
+        } else if (m_environmentMapEnabled && m_environmentTexture.isValid() && m_supersampleEnabled) {
             ImGui::TextDisabled("Adaptive quality: 1x while environment map is enabled");
         }
         changed |= ImGui::ColorEdit3("Light color", &m_light.color.r);

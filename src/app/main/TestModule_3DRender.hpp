@@ -81,6 +81,8 @@ public:
     bool setLightDirection(const ST::Vector3& direction);
     void setLightIntensity(float intensity);
     struct EditorSettings {
+        // 0 = Adaptive, 1 = Preview, 2 = Final.
+        int renderQuality = 0;
         bool supersampleEnabled = true;
         bool flatShading = false;
         bool showLightGizmo = true;
@@ -164,6 +166,7 @@ private:
     float m_environmentIntensity = 0.35f;
     bool m_toneMappingEnabled = true;
     float m_exposure = 1.0f;
+    int m_renderQuality = 0;
     double m_frameTimeMs = 0.0;
     double m_fps = 0.0;
     bool m_environmentMapEnabled = true;
