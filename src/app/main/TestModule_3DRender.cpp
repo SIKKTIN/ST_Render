@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
 #include <limits>
 #include <nlohmann/json.hpp>
 
@@ -54,6 +55,10 @@ TestModule_3DRender::TestModule_3DRender()
     scanShaderCatalog();
     if (m_selectedShaderIndex >= 0) loadSelectedShader();
     scanTextureCatalog();
+    m_environmentTexturePath = "environment/studio_small_01.jpg";
+    if (!m_environmentTexture.load((m_textureRoot + "/" + m_environmentTexturePath).c_str())) {
+        m_environmentTexture.load((std::string("../../Data/Textures/") + m_environmentTexturePath).c_str());
+    }
     scanModelCatalog();
     // The generated default scene is a clean starting point; only user
     // edits should add the unsaved marker.
@@ -592,6 +597,7 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "environmentIntensity", m_environmentIntensity },
             { "toneMapping", m_toneMappingEnabled },
             { "exposure", m_exposure },
+            { "environmentMap", m_environmentMapEnabled ? m_environmentTexturePath : std::string() },
             { "direction", vectorJson(m_light.direction) },
             { "color", colorJson(m_light.color) },
             { "intensity", m_light.intensity }
@@ -823,6 +829,13 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
             m_environmentIntensity = std::clamp(lighting.value("environmentIntensity", m_environmentIntensity), 0.0f, 5.0f);
             m_toneMappingEnabled = lighting.value("toneMapping", m_toneMappingEnabled);
             m_exposure = std::clamp(lighting.value("exposure", m_exposure), 0.0f, 5.0f);
+            const std::string environmentMap = lighting.value("environmentMap", m_environmentTexturePath);
+            if (!environmentMap.empty()) {
+                m_environmentMapEnabled = m_environmentTexture.load((m_textureRoot + "/" + environmentMap).c_str());
+                if (m_environmentMapEnabled) m_environmentTexturePath = environmentMap;
+            } else {
+                m_environmentMapEnabled = false;
+            }
             if (lighting.contains("direction")) setLightDirection(readVector(lighting["direction"], "light direction"));
             if (lighting.contains("color")) m_light.color = readColor(lighting["color"], "light color");
             m_light.intensity = std::clamp(lighting.value("intensity", m_light.intensity), 0.0f, 5.0f);
@@ -1018,11 +1031,12 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
         return m_fragmentShader.sampleTexture(uv);
     };
     const auto shader = m_activeShader ? m_activeShader : m_builtinShader;
-    // Imported meshes normally carry authored normals (or normals generated
-    // by the OBJ loader), so use smooth perspective-correct interpolation by
-    // default. The procedural fallback cube has shared corners and therefore
-    // still needs geometric face normals to preserve its hard edges.
-    const bool useFlatShading = m_flatShading || !m_modelLoaded;
+    // Imported meshes carry authored/generated vertex normals, so always use
+    // smooth perspective-correct interpolation for them. Only the procedural
+    // fallback cube needs geometric face normals because its corners are
+    // intentionally shared between faces. Do not let hierarchy selection
+    // state accidentally force an imported sphere into flat shading.
+    const bool useFlatShading = m_flatShading || (&mesh == &m_cube);
 
     const auto& verts = mesh.getVertices();
     const auto& idx = mesh.getIndices();
@@ -1156,6 +1170,7 @@ void TestModule_3DRender::update(float deltaTime) {
 }
 
 void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) {
+    const auto frameStart = std::chrono::steady_clock::now();
     if (canvasW == 0 || canvasH == 0) return;
     m_inputCanvasW = canvasW;
     m_inputCanvasH = canvasH;
@@ -1163,7 +1178,11 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // Dense meshes are fill-rate bound in the software rasterizer. During a
     // camera drag, render a half-resolution preview and let SDL upscale it;
     // mouse release schedules a sharp full-resolution frame.
-    const int qualityScale = (!m_interactionActive && m_supersampleEnabled) ? 2 : 1;
+    // PBR + environment reflection is fill-rate heavy in the software
+    // rasterizer. Keep the explicit supersampling option, but adapt it to 1x
+    // while the environment map is active so the viewport remains usable.
+    const bool heavyPbr = m_environmentMapEnabled && m_environmentTexture.isValid();
+    const int qualityScale = (!m_interactionActive && m_supersampleEnabled && !heavyPbr) ? 2 : 1;
     const int renderW = m_interactionActive
         ? std::max(1, canvasW / 2)
         : canvasW * qualityScale;
@@ -1213,6 +1232,17 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     m_fragmentShader.setViewPosition(eye);
     m_fragmentShader.setAmbient(m_ambientLight);
     m_fragmentShader.setEnvironment(m_environmentColor, m_environmentIntensity);
+    m_fragmentShader.setReducedQuality(m_interactionActive);
+    // Environment lookup performs trigonometric projection per fragment. Keep
+    // interaction responsive by using the cheap constant environment while
+    // the camera/gizmo is being dragged; restore reflections on release.
+    if (m_environmentMapEnabled && m_environmentTexture.isValid() && !m_interactionActive) {
+        m_fragmentShader.setEnvironmentTexture(m_environmentTexture.getPixels(),
+                                               m_environmentTexture.getWidth(),
+                                               m_environmentTexture.getHeight());
+    } else {
+        m_fragmentShader.setEnvironmentTexture({}, 0, 0);
+    }
     m_fragmentShader.setToneMapping(m_toneMappingEnabled, m_exposure);
     m_fragmentShader.clearLights();
     if (m_lightingEnabled) m_fragmentShader.addLight(m_light);
@@ -1273,169 +1303,182 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     drawSelectionOutline(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawTransformGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawLightGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
+
+    m_frameTimeMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - frameStart).count();
+    m_fps = m_frameTimeMs > 0.001 ? 1000.0 / m_frameTimeMs : 0.0;
 }
 
 bool TestModule_3DRender::renderControls() {
     bool changed = false;
-    changed |= renderSceneObjectControls();
-
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Camera (Fly, UE-style)");
-    ImGui::Separator();
-
-    changed |= ImGui::SliderFloat("Yaw",   &m_yaw,   -6.28f, 6.28f);
-    changed |= ImGui::SliderFloat("Pitch", &m_pitch, -1.5f,  1.5f);
-
-    changed |= ImGui::DragFloat3("Eye", &m_eye.x, 0.05f);
-
-    changed |= ImGui::SliderFloat("Speed",      &m_moveSpeed, m_moveSpeedMin, m_moveSpeedMax, "%.2f u/s");
-    if (ImGui::Button("Reset Camera")) {
-        m_eye    = ST::Vector3(1.6f, 1.0f, 2.5f);
-        m_yaw    = 0.6f;
-        m_pitch  = 0.35f;
-        m_moveSpeed = 2.5f;
-        changed = true;
-    }
-
-    ImGui::Separator();
-    ImGui::BulletText("LMB drag in canvas to look.");
-    ImGui::BulletText("RMB drag also looks; hold RMB + WASD/QE to fly.");
-    ImGui::BulletText("Shift = sprint, Wheel = change speed.");
-
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Lighting (GGX PBR)");
-    ImGui::Separator();
-    changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
-    changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
-    changed |= ImGui::Checkbox("Flat shading", &m_flatShading);
-    changed |= ImGui::Checkbox("2x final supersampling", &m_supersampleEnabled);
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Off: interpolate vertex normals (smooth)\nOn: use one geometric normal per triangle");
-    }
-    changed |= ImGui::ColorEdit3("Light color", &m_light.color.r);
-    const ST::Vector3 directionBeforeEdit = m_light.direction;
-    changed |= ImGui::DragFloat3("Light direction", &m_light.direction.x, 0.02f, -1.0f, 1.0f);
-    if (m_light.direction.lengthSquared() < 1e-8f) {
-        m_light.direction = ST::Vector3(0.0f, -1.0f, 0.0f);
-    } else {
-        m_light.direction.normalize();
-    }
-    if (m_light.direction != directionBeforeEdit) syncLightAnglesFromDirection();
-    changed |= ImGui::SliderFloat("Light intensity", &m_light.intensity, 0.0f, 5.0f);
     ST::Material* editedMaterial = &m_material;
     if (m_selectedSceneObject >= 0 &&
         m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
         editedMaterial = &m_sceneObjects[m_selectedSceneObject].material;
     }
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Material Inspector");
-    changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
-    changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
-    changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
-    changed |= ImGui::SliderFloat("Normal strength", &editedMaterial->normalStrength, 0.0f, 2.0f);
-    changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
-    if (m_selectedSceneObject >= 0 &&
-        m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
-        SceneObject& selectedObject = m_sceneObjects[m_selectedSceneObject];
-        const int selectedTexture = m_textureCatalog.findByRelativePath(selectedObject.diffuseTexturePath);
-        const char* texturePreview = selectedTexture >= 0
-            ? m_textureCatalog.getEntries()[selectedTexture].displayName.c_str()
-            : (selectedObject.diffuseTexturePath.empty() ? "None (material color)" : "External texture");
-        if (ImGui::BeginCombo("Base Color texture", texturePreview)) {
-            const bool noneSelected = selectedObject.diffuseTexturePath.empty();
-            if (ImGui::Selectable("None (material color)", noneSelected)) {
-                loadDiffuseTextureForObject(m_selectedSceneObject, -1);
-                changed = true;
-            }
-            if (noneSelected) ImGui::SetItemDefaultFocus();
-            for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
-                const auto& entry = m_textureCatalog.getEntries()[i];
-                const bool isSelected = i == selectedTexture;
-                if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
-                    if (loadDiffuseTextureForObject(m_selectedSceneObject, i)) changed = true;
-                }
-                if (isSelected) ImGui::SetItemDefaultFocus();
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
-            }
-            ImGui::EndCombo();
+    const ImGuiTreeNodeFlags defaultOpen = ImGuiTreeNodeFlags_DefaultOpen;
+    if (ImGui::CollapsingHeader("Selected Object", defaultOpen)) {
+        changed |= renderSceneObjectControls();
+    }
+
+    if (ImGui::CollapsingHeader("Camera (Fly, UE-style)", defaultOpen)) {
+        changed |= ImGui::SliderFloat("Yaw",   &m_yaw,   -6.28f, 6.28f);
+        changed |= ImGui::SliderFloat("Pitch", &m_pitch, -1.5f,  1.5f);
+        changed |= ImGui::DragFloat3("Eye", &m_eye.x, 0.05f);
+        changed |= ImGui::SliderFloat("Speed", &m_moveSpeed, m_moveSpeedMin, m_moveSpeedMax, "%.2f u/s");
+        if (ImGui::Button("Reset Camera")) {
+            m_eye = ST::Vector3(1.6f, 1.0f, 2.5f);
+            m_yaw = 0.6f;
+            m_pitch = 0.35f;
+            m_moveSpeed = 2.5f;
+            changed = true;
         }
-        if (!selectedObject.diffuseTexturePath.empty()) {
-            ImGui::TextDisabled("%s", selectedObject.diffuseTexturePath.c_str());
+        ImGui::BulletText("LMB drag in canvas to look.");
+        ImGui::BulletText("RMB drag also looks; hold RMB + WASD/QE to fly.");
+        ImGui::BulletText("Shift = sprint, Wheel = change speed.");
+    }
+
+    if (ImGui::CollapsingHeader("Lighting (GGX PBR)", defaultOpen)) {
+        changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
+        changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
+        changed |= ImGui::Checkbox("Flat shading", &m_flatShading);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Off: interpolate vertex normals (smooth)\nOn: use one geometric normal per triangle");
         }
-        auto scalarTextureCombo = [&](const char* label, std::string& path, bool metallic) {
-            const int selectedMap = m_textureCatalog.findByRelativePath(path);
-            const char* preview = selectedMap >= 0
-                ? m_textureCatalog.getEntries()[selectedMap].displayName.c_str()
-                : (path.empty() ? "None (uniform value)" : "External texture");
-            if (ImGui::BeginCombo(label, preview)) {
-                const bool noneSelected = path.empty();
-                if (ImGui::Selectable("None (uniform value)", noneSelected)) {
-                    if (loadScalarTextureForObject(m_selectedSceneObject, -1, metallic)) changed = true;
+        changed |= ImGui::Checkbox("2x final supersampling", &m_supersampleEnabled);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Environment-map PBR automatically uses 1x to keep the software renderer responsive.");
+        }
+        if (m_environmentMapEnabled && m_environmentTexture.isValid() && m_supersampleEnabled) {
+            ImGui::TextDisabled("Adaptive quality: 1x while environment map is enabled");
+        }
+        changed |= ImGui::ColorEdit3("Light color", &m_light.color.r);
+        const ST::Vector3 directionBeforeEdit = m_light.direction;
+        changed |= ImGui::DragFloat3("Light direction", &m_light.direction.x, 0.02f, -1.0f, 1.0f);
+        if (m_light.direction.lengthSquared() < 1e-8f) {
+            m_light.direction = ST::Vector3(0.0f, -1.0f, 0.0f);
+        } else {
+            m_light.direction.normalize();
+        }
+        if (m_light.direction != directionBeforeEdit) syncLightAnglesFromDirection();
+        changed |= ImGui::SliderFloat("Light intensity", &m_light.intensity, 0.0f, 5.0f);
+    }
+
+    if (ImGui::CollapsingHeader("Material Inspector", defaultOpen)) {
+        changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
+        changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
+        changed |= ImGui::SliderFloat("Normal strength", &editedMaterial->normalStrength, 0.0f, 2.0f);
+        changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
+        if (m_selectedSceneObject >= 0 &&
+            m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
+            SceneObject& selectedObject = m_sceneObjects[m_selectedSceneObject];
+            const int selectedTexture = m_textureCatalog.findByRelativePath(selectedObject.diffuseTexturePath);
+            const char* texturePreview = selectedTexture >= 0
+                ? m_textureCatalog.getEntries()[selectedTexture].displayName.c_str()
+                : (selectedObject.diffuseTexturePath.empty() ? "None (material color)" : "External texture");
+            if (ImGui::BeginCombo("Base Color texture", texturePreview)) {
+                const bool noneSelected = selectedObject.diffuseTexturePath.empty();
+                if (ImGui::Selectable("None (material color)", noneSelected)) {
+                    loadDiffuseTextureForObject(m_selectedSceneObject, -1);
+                    changed = true;
                 }
                 if (noneSelected) ImGui::SetItemDefaultFocus();
                 for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
                     const auto& entry = m_textureCatalog.getEntries()[i];
-                    const bool isSelected = i == selectedMap;
+                    const bool isSelected = i == selectedTexture;
                     if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
-                        if (loadScalarTextureForObject(m_selectedSceneObject, i, metallic)) changed = true;
+                        if (loadDiffuseTextureForObject(m_selectedSceneObject, i)) changed = true;
                     }
                     if (isSelected) ImGui::SetItemDefaultFocus();
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
                 }
                 ImGui::EndCombo();
             }
-            if (!path.empty()) ImGui::TextDisabled("%s", path.c_str());
-        };
-        scalarTextureCombo("Roughness texture", selectedObject.roughnessTexturePath, false);
-        scalarTextureCombo("Metallic texture", selectedObject.metallicTexturePath, true);
-        const int selectedNormal = m_textureCatalog.findByRelativePath(selectedObject.normalTexturePath);
-        const char* normalPreview = selectedNormal >= 0
-            ? m_textureCatalog.getEntries()[selectedNormal].displayName.c_str()
-            : (selectedObject.normalTexturePath.empty() ? "None (flat surface normal)" : "External texture");
-        if (ImGui::BeginCombo("Normal texture", normalPreview)) {
-            const bool noneSelected = selectedObject.normalTexturePath.empty();
-            if (ImGui::Selectable("None (flat surface normal)", noneSelected)) {
-                if (loadNormalTextureForObject(m_selectedSceneObject, -1)) changed = true;
+            if (!selectedObject.diffuseTexturePath.empty()) {
+                ImGui::TextDisabled("%s", selectedObject.diffuseTexturePath.c_str());
             }
-            if (noneSelected) ImGui::SetItemDefaultFocus();
-            for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
-                const auto& entry = m_textureCatalog.getEntries()[i];
-                const bool isSelected = i == selectedNormal;
-                if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
-                    if (loadNormalTextureForObject(m_selectedSceneObject, i)) changed = true;
+            auto scalarTextureCombo = [&](const char* label, std::string& path, bool metallic) {
+                const int selectedMap = m_textureCatalog.findByRelativePath(path);
+                const char* preview = selectedMap >= 0
+                    ? m_textureCatalog.getEntries()[selectedMap].displayName.c_str()
+                    : (path.empty() ? "None (uniform value)" : "External texture");
+                if (ImGui::BeginCombo(label, preview)) {
+                    const bool noneSelected = path.empty();
+                    if (ImGui::Selectable("None (uniform value)", noneSelected)) {
+                        if (loadScalarTextureForObject(m_selectedSceneObject, -1, metallic)) changed = true;
+                    }
+                    if (noneSelected) ImGui::SetItemDefaultFocus();
+                    for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
+                        const auto& entry = m_textureCatalog.getEntries()[i];
+                        const bool isSelected = i == selectedMap;
+                        if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
+                            if (loadScalarTextureForObject(m_selectedSceneObject, i, metallic)) changed = true;
+                        }
+                        if (isSelected) ImGui::SetItemDefaultFocus();
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+                    }
+                    ImGui::EndCombo();
                 }
-                if (isSelected) ImGui::SetItemDefaultFocus();
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+                if (!path.empty()) ImGui::TextDisabled("%s", path.c_str());
+            };
+            scalarTextureCombo("Roughness texture", selectedObject.roughnessTexturePath, false);
+            scalarTextureCombo("Metallic texture", selectedObject.metallicTexturePath, true);
+            const int selectedNormal = m_textureCatalog.findByRelativePath(selectedObject.normalTexturePath);
+            const char* normalPreview = selectedNormal >= 0
+                ? m_textureCatalog.getEntries()[selectedNormal].displayName.c_str()
+                : (selectedObject.normalTexturePath.empty() ? "None (flat surface normal)" : "External texture");
+            if (ImGui::BeginCombo("Normal texture", normalPreview)) {
+                const bool noneSelected = selectedObject.normalTexturePath.empty();
+                if (ImGui::Selectable("None (flat surface normal)", noneSelected)) {
+                    if (loadNormalTextureForObject(m_selectedSceneObject, -1)) changed = true;
+                }
+                if (noneSelected) ImGui::SetItemDefaultFocus();
+                for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
+                    const auto& entry = m_textureCatalog.getEntries()[i];
+                    const bool isSelected = i == selectedNormal;
+                    if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
+                        if (loadNormalTextureForObject(m_selectedSceneObject, i)) changed = true;
+                    }
+                    if (isSelected) ImGui::SetItemDefaultFocus();
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+                }
+                ImGui::EndCombo();
             }
-            ImGui::EndCombo();
+            if (!selectedObject.normalTexturePath.empty()) {
+                ImGui::TextDisabled("%s", selectedObject.normalTexturePath.c_str());
+            }
+            if (ImGui::Button("Refresh texture list")) {
+                scanTextureCatalog();
+                changed = true;
+            }
         }
-        if (!selectedObject.normalTexturePath.empty()) {
-            ImGui::TextDisabled("%s", selectedObject.normalTexturePath.c_str());
+    }
+
+    if (ImGui::CollapsingHeader("Advanced Lighting")) {
+        changed |= ImGui::ColorEdit3("Ambient", &editedMaterial->ambient.x);
+        changed |= ImGui::ColorEdit3("Specular", &editedMaterial->specular.x);
+        changed |= ImGui::SliderFloat("Legacy shininess", &editedMaterial->shininess, 1.0f, 256.0f);
+        changed |= ImGui::ColorEdit3("Ambient light", &m_ambientLight.x);
+        changed |= ImGui::ColorEdit3("Environment color", &m_environmentColor.x);
+        changed |= ImGui::SliderFloat("Environment intensity", &m_environmentIntensity, 0.0f, 5.0f);
+        changed |= ImGui::Checkbox("Environment map", &m_environmentMapEnabled);
+        if (m_environmentMapEnabled && m_environmentTexture.isValid()) {
+            ImGui::TextDisabled("%s", m_environmentTexturePath.c_str());
         }
-        if (ImGui::Button("Refresh texture list")) {
-            scanTextureCatalog();
+        changed |= ImGui::Checkbox("Tone mapping", &m_toneMappingEnabled);
+        changed |= ImGui::SliderFloat("Exposure", &m_exposure, 0.0f, 5.0f);
+        if (ImGui::Button("Reset Light")) {
+            m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
+            m_light.color = ST::Color::white();
+            m_light.intensity = 1.4f;
+            syncLightAnglesFromDirection();
             changed = true;
         }
     }
-    ImGui::Separator();
-    ImGui::TextDisabled("Advanced lighting");
-    changed |= ImGui::ColorEdit3("Ambient", &editedMaterial->ambient.x);
-    changed |= ImGui::ColorEdit3("Specular", &editedMaterial->specular.x);
-    changed |= ImGui::SliderFloat("Legacy shininess", &editedMaterial->shininess, 1.0f, 256.0f);
-    changed |= ImGui::ColorEdit3("Ambient light", &m_ambientLight.x);
-    changed |= ImGui::ColorEdit3("Environment color", &m_environmentColor.x);
-    changed |= ImGui::SliderFloat("Environment intensity", &m_environmentIntensity, 0.0f, 5.0f);
-    changed |= ImGui::Checkbox("Tone mapping", &m_toneMappingEnabled);
-    changed |= ImGui::SliderFloat("Exposure", &m_exposure, 0.0f, 5.0f);
-    if (ImGui::Button("Reset Light")) {
-        m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
-        m_light.color = ST::Color::white();
-        m_light.intensity = 1.4f;
-        syncLightAnglesFromDirection();
-        changed = true;
-    }
 
-    changed |= renderShaderControls();
-    changed |= renderModelControls();
+    if (ImGui::CollapsingHeader("Shader")) changed |= renderShaderControls();
+    if (ImGui::CollapsingHeader("Model")) changed |= renderModelControls();
     if (!m_sceneWarning.empty()) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "Scene warning");
         ImGui::TextWrapped("%s", m_sceneWarning.c_str());
@@ -1449,8 +1492,6 @@ bool TestModule_3DRender::renderControls() {
 
 bool TestModule_3DRender::renderSceneObjectControls() {
     bool changed = false;
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Selected Object");
-    ImGui::Separator();
     if (m_selectedSceneObject < 0 ||
         m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) {
         ImGui::TextDisabled("No scene object selected");
@@ -1735,9 +1776,6 @@ void TestModule_3DRender::drawLightGizmo(SDL_Renderer* renderer,
 
 bool TestModule_3DRender::renderModelControls() {
     bool changed = false;
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Model");
-    ImGui::Separator();
 
     const auto& entries = m_modelCatalog.getEntries();
     if (entries.empty()) {
@@ -1794,9 +1832,6 @@ bool TestModule_3DRender::renderModelControls() {
 
 bool TestModule_3DRender::renderShaderControls() {
     bool changed = false;
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.35f, 0.75f, 1.0f, 1.0f), "Shader");
-    ImGui::Separator();
 
     const auto& entries = m_shaderCatalog.getEntries();
     if (entries.empty()) {
@@ -1849,7 +1884,7 @@ bool TestModule_3DRender::renderShaderControls() {
     }
 
     if (m_activeShader == m_builtinShader) {
-        ImGui::TextDisabled("Active: built-in Blinn-Phong shader");
+        ImGui::TextDisabled("Active: built-in GGX PBR shader");
     } else if (m_shaderError.empty()) {
         ImGui::TextColored(ImVec4(0.35f, 0.95f, 0.45f, 1.0f), "Active: script shader");
     }

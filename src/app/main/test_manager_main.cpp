@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <iterator>
+#include <cstdio>
 #include <nlohmann/json.hpp>
 
 #include "imgui_impl_sdl2.h"
@@ -1336,6 +1337,17 @@ int main(int argc, char* argv[]) {
             if (selectedModule >= 0 && selectedModule < (int)entries.size()) {
                 ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.2f, 1.0f), "%s",
                                    selectedLeaf() ? selectedLeaf()->getName() : entries[selectedModule].label);
+                if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+                    char renderStatus[96]{};
+                    std::snprintf(renderStatus, sizeof(renderStatus),
+                                  "%.2f ms  %.1f FPS%s",
+                                  render3D->getFrameTimeMs(), render3D->getFps(),
+                                  render3D->isInteractionActive() ? "  [interactive]" : "");
+                    const float statusWidth = ImGui::CalcTextSize(renderStatus).x;
+                    const float rightEdge = ImGui::GetWindowContentRegionMax().x;
+                    ImGui::SameLine(std::max(ImGui::GetCursorPosX(), rightEdge - statusWidth));
+                    ImGui::TextDisabled("%s", renderStatus);
+                }
                 ImGui::Separator();
 
                 float splitterH = 8.0f;

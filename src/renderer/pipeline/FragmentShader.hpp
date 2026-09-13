@@ -101,7 +101,9 @@ namespace ST {
 
 		void setAmbient(const Vector3& ambient);
 		void setEnvironment(const Vector3& color, float intensity);
+		void setEnvironmentTexture(const std::vector<Color>& texture, int width, int height);
 		void setToneMapping(bool enabled, float exposure);
+		void setReducedQuality(bool reduced);
 		void setViewPosition(const Vector3& position) { m_viewPosition = position; }
 		const Vector3& getViewPosition() const { return m_viewPosition; }
 
@@ -127,21 +129,29 @@ namespace ST {
 		float m_environmentIntensity;
 		bool m_toneMappingEnabled;
 		float m_exposure;
+		bool m_reducedQuality;
+		const std::vector<Color>* m_environmentTexture;
+		int m_environmentTextureWidth;
+		int m_environmentTextureHeight;
+		bool m_hasEnvironmentTexture;
+		std::vector<Color> m_filteredEnvironmentTexture;
+		int m_filteredEnvironmentWidth;
+		int m_filteredEnvironmentHeight;
 		Vector3 m_viewPosition;
 
-		std::vector<Color> m_texture;
+		const std::vector<Color>* m_texture;
 		int m_textureWidth;
 		int m_textureHeight;
 		bool m_hasTexture;
-		std::vector<Color> m_roughnessTexture;
+		const std::vector<Color>* m_roughnessTexture;
 		int m_roughnessTextureWidth;
 		int m_roughnessTextureHeight;
 		bool m_hasRoughnessTexture;
-		std::vector<Color> m_metallicTexture;
+		const std::vector<Color>* m_metallicTexture;
 		int m_metallicTextureWidth;
 		int m_metallicTextureHeight;
 		bool m_hasMetallicTexture;
-		std::vector<Color> m_normalTexture;
+		const std::vector<Color>* m_normalTexture;
 		int m_normalTextureWidth;
 		int m_normalTextureHeight;
 		bool m_hasNormalTexture;

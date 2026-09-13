@@ -34,6 +34,9 @@ public:
 
     const char* getName() const override { return "3D Render"; }
     bool needsRealTimeUpdate() const override { return true; }
+    double getFrameTimeMs() const { return m_frameTimeMs; }
+    double getFps() const { return m_fps; }
+    bool isInteractionActive() const { return m_interactionActive; }
 
     void update(float deltaTime) override;
     void render(void* canvasTexture, int canvasW, int canvasH) override;
@@ -161,6 +164,11 @@ private:
     float m_environmentIntensity = 0.35f;
     bool m_toneMappingEnabled = true;
     float m_exposure = 1.0f;
+    double m_frameTimeMs = 0.0;
+    double m_fps = 0.0;
+    bool m_environmentMapEnabled = true;
+    ST::Image m_environmentTexture;
+    std::string m_environmentTexturePath;
     bool m_lightingEnabled;
     bool m_flatShading = false;
     bool m_supersampleEnabled = true;

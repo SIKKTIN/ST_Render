@@ -6,17 +6,26 @@
 #include <cmath>
 
 namespace ST {
+namespace {
+Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, int height,
+                                const Vector2& uv);
+}
+
     FragmentShader::FragmentShader()
-        : m_ambient(0.1f, 0.1f, 0.1f)
+        : m_texture(nullptr)
+        , m_ambient(0.1f, 0.1f, 0.1f)
         , m_textureWidth(0)
         , m_textureHeight(0)
         , m_hasTexture(false)
+        , m_roughnessTexture(nullptr)
         , m_roughnessTextureWidth(0)
         , m_roughnessTextureHeight(0)
         , m_hasRoughnessTexture(false)
+        , m_metallicTexture(nullptr)
         , m_metallicTextureWidth(0)
         , m_metallicTextureHeight(0)
         , m_hasMetallicTexture(false)
+        , m_normalTexture(nullptr)
         , m_normalTextureWidth(0)
         , m_normalTextureHeight(0)
         , m_hasNormalTexture(false) {
@@ -26,6 +35,13 @@ namespace ST {
 		m_environmentIntensity = 0.35f;
 		m_toneMappingEnabled = true;
 		m_exposure = 1.0f;
+		m_reducedQuality = false;
+		m_environmentTexture = nullptr;
+		m_environmentTextureWidth = 0;
+		m_environmentTextureHeight = 0;
+		m_hasEnvironmentTexture = false;
+		m_filteredEnvironmentWidth = 256;
+		m_filteredEnvironmentHeight = 128;
     }
 
 	void FragmentShader::setMaterial(const Material& mat) {
@@ -59,32 +75,66 @@ namespace ST {
 		m_exposure = std::max(0.0f, exposure);
 	}
 
+	void FragmentShader::setReducedQuality(bool reduced) {
+		m_reducedQuality = reduced;
+	}
+
+	void FragmentShader::setEnvironmentTexture(const std::vector<Color>& texture, int width, int height) {
+		const std::vector<Color>* source = texture.empty() ? nullptr : &texture;
+		if (source == m_environmentTexture && width == m_environmentTextureWidth &&
+			height == m_environmentTextureHeight) {
+			return;
+		}
+		m_environmentTexture = source;
+		m_environmentTextureWidth = width;
+		m_environmentTextureHeight = height;
+		m_hasEnvironmentTexture = m_environmentTexture != nullptr && width > 0 && height > 0;
+		m_filteredEnvironmentTexture.clear();
+		if (!m_hasEnvironmentTexture) return;
+
+		// The source environment is a high-frequency tonemapped panorama. Build
+		// a small filtered copy once when the map changes; sampling this cache
+		// prevents bright single-pixel texels from turning into static sparkle.
+		m_filteredEnvironmentTexture.resize(
+			static_cast<size_t>(m_filteredEnvironmentWidth) * m_filteredEnvironmentHeight);
+		for (int y = 0; y < m_filteredEnvironmentHeight; ++y) {
+			for (int x = 0; x < m_filteredEnvironmentWidth; ++x) {
+				const float u = (static_cast<float>(x) + 0.5f) /
+					static_cast<float>(m_filteredEnvironmentWidth);
+				const float v = (static_cast<float>(y) + 0.5f) /
+					static_cast<float>(m_filteredEnvironmentHeight);
+				m_filteredEnvironmentTexture[static_cast<size_t>(y) * m_filteredEnvironmentWidth + x] =
+					sampleTextureBilinearFrom(*m_environmentTexture, width, height, Vector2(u, v));
+			}
+		}
+	}
+
 	void FragmentShader::setTexture(const std::vector<Color>& texture, int width, int height) {
-		m_texture = texture;
+		m_texture = texture.empty() ? nullptr : &texture;
 		m_textureWidth = width;
 		m_textureHeight = height;
-		m_hasTexture = !texture.empty();
+		m_hasTexture = m_texture != nullptr && width > 0 && height > 0;
 	}
 
 	void FragmentShader::setRoughnessTexture(const std::vector<Color>& texture, int width, int height) {
-		m_roughnessTexture = texture;
+		m_roughnessTexture = texture.empty() ? nullptr : &texture;
 		m_roughnessTextureWidth = width;
 		m_roughnessTextureHeight = height;
-		m_hasRoughnessTexture = !texture.empty() && width > 0 && height > 0;
+		m_hasRoughnessTexture = m_roughnessTexture != nullptr && width > 0 && height > 0;
 	}
 
 	void FragmentShader::setMetallicTexture(const std::vector<Color>& texture, int width, int height) {
-		m_metallicTexture = texture;
+		m_metallicTexture = texture.empty() ? nullptr : &texture;
 		m_metallicTextureWidth = width;
 		m_metallicTextureHeight = height;
-		m_hasMetallicTexture = !texture.empty() && width > 0 && height > 0;
+		m_hasMetallicTexture = m_metallicTexture != nullptr && width > 0 && height > 0;
 	}
 
 	void FragmentShader::setNormalTexture(const std::vector<Color>& texture, int width, int height) {
-		m_normalTexture = texture;
+		m_normalTexture = texture.empty() ? nullptr : &texture;
 		m_normalTextureWidth = width;
 		m_normalTextureHeight = height;
-		m_hasNormalTexture = !texture.empty() && width > 0 && height > 0;
+		m_hasNormalTexture = m_normalTexture != nullptr && width > 0 && height > 0;
 	}
 
 	namespace {
@@ -112,6 +162,18 @@ namespace ST {
 		return Color::lerp(top, bottom, fy);
 	}
 
+	Color sampleTextureNearestFrom(const std::vector<Color>& texture, int width, int height,
+		const Vector2& uv) {
+		if (texture.empty() || width <= 0 || height <= 0) return Color::white();
+		float u = std::fmod(uv.x, 1.0f);
+		float v = std::fmod(uv.y, 1.0f);
+		if (u < 0.0f) u += 1.0f;
+		if (v < 0.0f) v += 1.0f;
+		const int x = std::clamp(static_cast<int>(u * width), 0, width - 1);
+		const int y = std::clamp(static_cast<int>(v * height), 0, height - 1);
+		return texture[y * width + x];
+	}
+
 	float sampleScalarMap(const std::vector<Color>& texture, int width, int height,
 	                     const Vector2& uv, bool enabled) {
 		if (!enabled || texture.empty() || width <= 0 || height <= 0) return 1.0f;
@@ -122,6 +184,13 @@ namespace ST {
 		const int x = std::clamp(static_cast<int>(u * width), 0, width - 1);
 		const int y = std::clamp(static_cast<int>(v * height), 0, height - 1);
 		const Color& sample = texture[y * width + x];
+		return (sample.r + sample.g + sample.b) / 3.0f;
+	}
+
+	float sampleScalarMapBilinear(const std::vector<Color>& texture, int width, int height,
+	                              const Vector2& uv, bool enabled) {
+		if (!enabled || texture.empty() || width <= 0 || height <= 0) return 1.0f;
+		const Color sample = sampleTextureBilinearFrom(texture, width, height, uv);
 		return (sample.r + sample.g + sample.b) / 3.0f;
 	}
 }
@@ -151,10 +220,10 @@ namespace ST {
 		const int wrappedX1 = (wrappedX0 + 1) % m_textureWidth;
 		const int wrappedY1 = (wrappedY0 + 1) % m_textureHeight;
 
-		const Color& c00 = m_texture[wrappedY0 * m_textureWidth + wrappedX0];
-		const Color& c10 = m_texture[wrappedY0 * m_textureWidth + wrappedX1];
-		const Color& c01 = m_texture[wrappedY1 * m_textureWidth + wrappedX0];
-		const Color& c11 = m_texture[wrappedY1 * m_textureWidth + wrappedX1];
+		const Color& c00 = (*m_texture)[wrappedY0 * m_textureWidth + wrappedX0];
+		const Color& c10 = (*m_texture)[wrappedY0 * m_textureWidth + wrappedX1];
+		const Color& c01 = (*m_texture)[wrappedY1 * m_textureWidth + wrappedX0];
+		const Color& c11 = (*m_texture)[wrappedY1 * m_textureWidth + wrappedX1];
 		const Color top = Color::lerp(c00, c10, fx);
 		const Color bottom = Color::lerp(c01, c11, fx);
 		return Color::lerp(top, bottom, fy);
@@ -169,7 +238,7 @@ namespace ST {
 		int x = static_cast<int>(u * (m_textureWidth - 1));
 		int y = static_cast<int>(v * (m_textureHeight - 1));
 
-		return m_texture[y * m_textureWidth + x];
+		return (*m_texture)[y * m_textureWidth + x];
 	}
 
 	Color FragmentShader::lerpColor(const Color& a, const Color& b, float t) {
@@ -289,8 +358,11 @@ namespace ST {
 		Vector3 viewDir = (m_viewPosition - fragment.worldPosition).normalized();
 		Vector3 shadingNormal = fragment.normal.normalized();
 		if (m_hasNormalTexture) {
-			const Color normalSample = sampleTextureBilinearFrom(m_normalTexture, m_normalTextureWidth,
-				m_normalTextureHeight, fragment.texCoord);
+			const Color normalSample = m_reducedQuality
+				? sampleTextureNearestFrom(*m_normalTexture, m_normalTextureWidth,
+					m_normalTextureHeight, fragment.texCoord)
+				: sampleTextureBilinearFrom(*m_normalTexture, m_normalTextureWidth,
+					m_normalTextureHeight, fragment.texCoord);
 			const Vector3 tangent = fragment.tangent.normalized();
 			const Vector3 bitangent = shadingNormal.cross(tangent).normalized();
 			const float normalStrength = std::max(0.0f, m_material.normalStrength);
@@ -304,10 +376,17 @@ namespace ST {
 		}
 		Color texColor = m_hasTexture ? sampleTexture(fragment.texCoord) : fragment.color;
 		const Vector3 baseColor = m_material.diffuse * Vector3(texColor.r, texColor.g, texColor.b);
-		const float metallicMap = sampleScalarMap(m_metallicTexture, m_metallicTextureWidth,
-			m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture);
-		const float roughnessMap = sampleScalarMap(m_roughnessTexture, m_roughnessTextureWidth,
-			m_roughnessTextureHeight, fragment.texCoord, m_hasRoughnessTexture);
+		static const std::vector<Color> emptyTexture;
+		const float metallicMap = m_reducedQuality
+			? sampleScalarMap(m_hasMetallicTexture ? *m_metallicTexture : emptyTexture,
+				m_metallicTextureWidth, m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture)
+			: sampleScalarMapBilinear(m_hasMetallicTexture ? *m_metallicTexture : emptyTexture,
+				m_metallicTextureWidth, m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture);
+		const float roughnessMap = m_reducedQuality
+			? sampleScalarMap(m_hasRoughnessTexture ? *m_roughnessTexture : emptyTexture,
+				m_roughnessTextureWidth, m_roughnessTextureHeight, fragment.texCoord, m_hasRoughnessTexture)
+			: sampleScalarMapBilinear(m_hasRoughnessTexture ? *m_roughnessTexture : emptyTexture,
+				m_roughnessTextureWidth, m_roughnessTextureHeight, fragment.texCoord, m_hasRoughnessTexture);
 		const float metallic = clamp(m_material.metallicFactor * metallicMap, 0.0f, 1.0f);
 		const float roughness = clamp(m_material.roughness * roughnessMap, 0.02f, 1.0f);
 		const float pi = 3.14159265359f;
@@ -319,7 +398,18 @@ namespace ST {
 		// There is no image-based environment light yet. Keep a small ambient
 		// specular term so fully metallic materials remain readable in the
 		// directional-light-only editor viewport.
-		const Vector3 environment = m_environmentColor * m_environmentIntensity;
+		Vector3 environment = m_environmentColor * m_environmentIntensity;
+		if (m_hasEnvironmentTexture) {
+			const Vector3 reflection = (shadingNormal * (2.0f * shadingNormal.dot(viewDir)) - viewDir).normalized();
+			const float pi = 3.14159265359f;
+			const float u = 0.5f + std::atan2(reflection.z, reflection.x) / (2.0f * pi);
+			const float v = 0.5f - std::asin(clamp(reflection.y, -1.0f, 1.0f)) / pi;
+			const Color environmentSample = sampleTextureBilinearFrom(
+				m_filteredEnvironmentTexture, m_filteredEnvironmentWidth, m_filteredEnvironmentHeight,
+				Vector2(u, v));
+			environment = Vector3(environmentSample.r, environmentSample.g, environmentSample.b) *
+				m_environmentIntensity;
+		}
 		Vector3 totalLight = m_ambient * m_material.ambient *
 			(baseColor * (1.0f - metallic) + f0 * 0.8f) +
 			environment * (baseColor * (1.0f - metallic) + f0);

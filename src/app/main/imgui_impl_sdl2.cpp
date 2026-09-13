@@ -80,20 +80,26 @@ bool ImGui_ImplSDL2_ProcessEvent(const SDL_Event* event) {
         case SDL_MOUSEMOTION: {
             int w, h;
             SDL_GetWindowSize(((ImGui_ImplSDL2_Data*)io.BackendPlatformUserData)->Window, &w, &h);
-            io.MousePos.x = (float)event->motion.x;
-            io.MousePos.y = (float)event->motion.y;
+            // Queue the event instead of writing io.MousePos directly.  The
+            // main loop may drain several SDL events before ImGui::NewFrame;
+            // queued input preserves the exact order for hover/click logic.
+            io.AddMousePosEvent((float)event->motion.x, (float)event->motion.y);
             return true;
         }
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP: {
             int button = event->button.button - 1;
             if (button >= 0 && button < IM_ARRAYSIZE(io.MouseDown)) {
-                io.MouseDown[button] = (event->type == SDL_MOUSEBUTTONDOWN);
+                // Directly assigning io.MouseDown loses a quick down/up pair
+                // when both events are processed before the next NewFrame.
+                // ImGui's input queue keeps both transitions and makes
+                // IsItemClicked()/IsMouseClicked() reliable.
+                io.AddMouseButtonEvent(button, event->type == SDL_MOUSEBUTTONDOWN);
             }
             return true;
         }
         case SDL_MOUSEWHEEL: {
-            io.MouseWheel += (float)event->wheel.y;
+            io.AddMouseWheelEvent((float)event->wheel.x, (float)event->wheel.y);
             return true;
         }
         case SDL_KEYDOWN:

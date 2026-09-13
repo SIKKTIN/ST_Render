@@ -244,6 +244,56 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
     }
 
     std::vector<Vertex>& vertices = part.mesh.getVertices();
+
+    // Some repository meshes (notably sphere.obj) provide one identical
+    // normal for all three vertices of every triangle. That is a flat-shaded
+    // export, even though the editor's default mode is smooth shading. Detect
+    // that representation and rebuild normals by averaging faces that share a
+    // position so the imported sphere renders smoothly by default.
+    bool authoredNormals = !vertices.empty();
+    bool authoredFlat = authoredNormals;
+    for (size_t i = 0; i < vertices.size(); ++i) {
+        if (!hasNormal[i]) {
+            authoredNormals = false;
+            break;
+        }
+    }
+    if (authoredNormals) {
+        const auto& indices = part.mesh.getIndices();
+        for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+            const Vector3& n0 = vertices[indices[i + 0]].normal;
+            const Vector3& n1 = vertices[indices[i + 1]].normal;
+            const Vector3& n2 = vertices[indices[i + 2]].normal;
+            if ((n0 - n1).lengthSquared() > 1e-6f ||
+                (n0 - n2).lengthSquared() > 1e-6f) {
+                authoredFlat = false;
+                break;
+            }
+        }
+    }
+    if (authoredFlat) {
+        std::vector<Vector3> smoothNormals(vertices.size(), Vector3::zero());
+        const auto& indices = part.mesh.getIndices();
+        for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+            const int i0 = indices[i + 0];
+            const int i1 = indices[i + 1];
+            const int i2 = indices[i + 2];
+            const Vector3 faceNormal = (vertices[i1].position - vertices[i0].position)
+                .cross(vertices[i2].position - vertices[i0].position).normalized();
+            for (size_t vertexIndex = 0; vertexIndex < vertices.size(); ++vertexIndex) {
+                if ((vertices[vertexIndex].position - vertices[i0].position).lengthSquared() < 1e-10f ||
+                    (vertices[vertexIndex].position - vertices[i1].position).lengthSquared() < 1e-10f ||
+                    (vertices[vertexIndex].position - vertices[i2].position).lengthSquared() < 1e-10f) {
+                    smoothNormals[vertexIndex] += faceNormal;
+                }
+            }
+        }
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            if (smoothNormals[i].lengthSquared() > 1e-8f) {
+                vertices[i].normal = smoothNormals[i].normalized();
+            }
+        }
+    }
     for (size_t i = 0; i < vertices.size(); ++i) {
         if (!hasNormal[i]) vertices[i].normal = accumulatedNormals[i].normalized();
         if (vertices[i].normal.lengthSquared() < 1e-8f) vertices[i].normal = Vector3::forward();
