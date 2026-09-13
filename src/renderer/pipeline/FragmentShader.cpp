@@ -9,6 +9,19 @@ namespace ST {
 namespace {
 Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, int height,
                                 const Vector2& uv);
+
+float srgbChannelToLinear(float value) {
+	value = std::clamp(value, 0.0f, 1.0f);
+	return value <= 0.04045f
+		? value / 12.92f
+		: std::pow((value + 0.055f) / 1.055f, 2.4f);
+}
+
+Color srgbToLinear(const Color& color) {
+	return Color(srgbChannelToLinear(color.r),
+		srgbChannelToLinear(color.g),
+		srgbChannelToLinear(color.b), color.a);
+}
 }
 
     FragmentShader::FragmentShader()
@@ -44,10 +57,15 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		m_filteredEnvironmentWidths[1] = 128;
 		m_filteredEnvironmentWidths[2] = 64;
 		m_filteredEnvironmentWidths[3] = 32;
+		m_filteredEnvironmentWidths[4] = 16;
+		m_filteredEnvironmentWidths[5] = 8;
 		m_filteredEnvironmentHeights[0] = 128;
 		m_filteredEnvironmentHeights[1] = 64;
 		m_filteredEnvironmentHeights[2] = 32;
 		m_filteredEnvironmentHeights[3] = 16;
+		m_filteredEnvironmentHeights[4] = 8;
+		m_filteredEnvironmentHeights[5] = 4;
+		for (Vector3& axis : m_environmentDiffuseAxes) axis = m_environmentColor;
     }
 
 	void FragmentShader::setMaterial(const Material& mat) {
@@ -102,8 +120,8 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		// a small box-filtered mip chain once when the map changes. Roughness can
 		// then select a blur level with one lookup per fragment instead of doing
 		// several expensive panorama samples for every pixel.
-		m_filteredEnvironmentLevels.reserve(4);
-		for (int level = 0; level < 4; ++level) {
+		m_filteredEnvironmentLevels.reserve(EnvironmentLevelCount);
+		for (int level = 0; level < EnvironmentLevelCount; ++level) {
 			const std::vector<Color>* source = level == 0
 				? m_environmentTexture
 				: &m_filteredEnvironmentLevels[level - 1];
@@ -121,18 +139,43 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 						static_cast<float>(outputHeight);
 					const float du = 0.35f / static_cast<float>(outputWidth);
 					const float dv = 0.35f / static_cast<float>(outputHeight);
-					Color filtered = sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
-						Vector2(u - du, v - dv));
-					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
-						Vector2(u + du, v - dv));
-					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
-						Vector2(u - du, v + dv));
-					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
-						Vector2(u + du, v + dv));
+					const auto sampleEnvironmentSource = [&](const Vector2& uv) {
+						const Color sample = sampleTextureBilinearFrom(
+							*source, sourceWidth, sourceHeight, uv);
+						// JPG/PNG panorama pixels are display encoded. Convert the first
+						// downsample level to linear light before filtering and PBR use.
+						return level == 0 ? srgbToLinear(sample) : sample;
+					};
+					Color filtered = sampleEnvironmentSource(Vector2(u - du, v - dv));
+					filtered += sampleEnvironmentSource(Vector2(u + du, v - dv));
+					filtered += sampleEnvironmentSource(Vector2(u - du, v + dv));
+					filtered += sampleEnvironmentSource(Vector2(u + du, v + dv));
 					output[static_cast<size_t>(y) * outputWidth + x] = filtered * 0.25f;
 				}
 			}
 		}
+
+		// Approximate diffuse irradiance once per environment change. Six axis
+		// samples retain useful studio-light directionality and are blended with
+		// the surface normal at runtime without another panorama lookup.
+		const int diffuseLevel = EnvironmentLevelCount - 1;
+		const auto sampleAxis = [&](const Vector3& direction) {
+			const float pi = 3.14159265359f;
+			const Vector2 uv(
+				0.5f + std::atan2(direction.z, direction.x) / (2.0f * pi),
+				0.5f - std::asin(std::clamp(direction.y, -1.0f, 1.0f)) / pi);
+			const Color sample = sampleTextureBilinearFrom(
+				m_filteredEnvironmentLevels[diffuseLevel],
+				m_filteredEnvironmentWidths[diffuseLevel],
+				m_filteredEnvironmentHeights[diffuseLevel], uv);
+			return Vector3(sample.r, sample.g, sample.b);
+		};
+		m_environmentDiffuseAxes[0] = sampleAxis(Vector3(1.0f, 0.0f, 0.0f));
+		m_environmentDiffuseAxes[1] = sampleAxis(Vector3(-1.0f, 0.0f, 0.0f));
+		m_environmentDiffuseAxes[2] = sampleAxis(Vector3(0.0f, 1.0f, 0.0f));
+		m_environmentDiffuseAxes[3] = sampleAxis(Vector3(0.0f, -1.0f, 0.0f));
+		m_environmentDiffuseAxes[4] = sampleAxis(Vector3(0.0f, 0.0f, 1.0f));
+		m_environmentDiffuseAxes[5] = sampleAxis(Vector3(0.0f, 0.0f, -1.0f));
 	}
 
 	void FragmentShader::setTexture(const std::vector<Color>& texture, int width, int height) {
@@ -316,6 +359,7 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 			vertexOut.worldPosition,
 			vertexOut.normal.normalized(),
 			vertexOut.tangent.normalized(),
+			vertexOut.tangentSign,
 			vertexOut.texCoord,
 			vertexOut.color
 			});
@@ -408,8 +452,19 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 					m_normalTextureHeight, fragment.texCoord)
 				: sampleTextureBilinearFrom(*m_normalTexture, m_normalTextureWidth,
 					m_normalTextureHeight, fragment.texCoord);
-			const Vector3 tangent = fragment.tangent.normalized();
-			const Vector3 bitangent = shadingNormal.cross(tangent).normalized();
+			// Perspective-correctly interpolate the authored tangent, then
+			// Gram-Schmidt it against the interpolated normal. The handedness
+			// imported from FBX preserves mirrored UV islands.
+			Vector3 tangent = fragment.tangent -
+				shadingNormal * shadingNormal.dot(fragment.tangent);
+			if (tangent.lengthSquared() <= 1e-8f) {
+				const Vector3 helper = std::fabs(shadingNormal.y) < 0.999f
+					? Vector3(0.0f, 1.0f, 0.0f) : Vector3(1.0f, 0.0f, 0.0f);
+				tangent = helper.cross(shadingNormal);
+			}
+			tangent = tangent.normalized();
+			const float tangentSign = fragment.tangentSign < 0.0f ? -1.0f : 1.0f;
+			const Vector3 bitangent = shadingNormal.cross(tangent).normalized() * tangentSign;
 			const float normalStrength = std::max(0.0f, m_material.normalStrength);
 			// The editor's repository sample uses Poly Haven's DirectX normal
 			// convention, so invert the green channel into our OpenGL-style basis.
@@ -420,7 +475,9 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 				shadingNormal * tangentNormal.z).normalized();
 		}
 		Color texColor = m_hasTexture ? sampleTexture(fragment.texCoord) : fragment.color;
-		const Vector3 baseColor = m_material.diffuse * Vector3(texColor.r, texColor.g, texColor.b);
+		const Color linearTexColor = m_hasTexture ? srgbToLinear(texColor) : texColor;
+		const Vector3 baseColor = m_material.diffuse *
+			Vector3(linearTexColor.r, linearTexColor.g, linearTexColor.b);
 		static const std::vector<Color> emptyTexture;
 		const float metallicMap = m_reducedQuality
 			? sampleScalarMap(m_hasMetallicTexture ? *m_metallicTexture : emptyTexture,
@@ -440,35 +497,58 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		const Vector3 dielectricF0 = m_material.specular * 0.08f;
 		const Vector3 f0 = dielectricF0 * (1.0f - metallic) + baseColor * metallic;
 		const float nDotV = std::max(0.0f, shadingNormal.dot(viewDir));
-		// There is no image-based environment light yet. Keep a small ambient
-		// specular term so fully metallic materials remain readable in the
-		// directional-light-only editor viewport.
-		Vector3 environment = m_environmentColor * m_environmentIntensity;
+		// Start with the constant environment fallback. When a panorama is
+		// present it is split into diffuse irradiance and roughness-filtered
+		// specular terms below.
+		Vector3 diffuseEnvironment = m_environmentColor * m_environmentIntensity;
+		Vector3 specularEnvironment = diffuseEnvironment;
 		if (m_hasEnvironmentTexture) {
 			const Vector3 reflection = (shadingNormal * (2.0f * shadingNormal.dot(viewDir)) - viewDir).normalized();
 			const float pi = 3.14159265359f;
-			const float u = 0.5f + std::atan2(reflection.z, reflection.x) / (2.0f * pi);
-			const float v = 0.5f - std::asin(clamp(reflection.y, -1.0f, 1.0f)) / pi;
-			const float environmentMip = roughness * 3.0f;
-			const int environmentLevel0 = std::clamp(static_cast<int>(std::floor(environmentMip)), 0, 3);
-			const int environmentLevel1 = std::min(3, environmentLevel0 + 1);
+			const auto environmentUv = [&](const Vector3& direction) {
+				return Vector2(
+					0.5f + std::atan2(direction.z, direction.x) / (2.0f * pi),
+					0.5f - std::asin(clamp(direction.y, -1.0f, 1.0f)) / pi);
+			};
+			const float environmentMip = roughness *
+				static_cast<float>(EnvironmentLevelCount - 1);
+			const int environmentLevel0 = std::clamp(
+				static_cast<int>(std::floor(environmentMip)), 0, EnvironmentLevelCount - 1);
+			const int environmentLevel1 = std::min(EnvironmentLevelCount - 1,
+				environmentLevel0 + 1);
 			const float environmentLevelBlend = environmentMip - static_cast<float>(environmentLevel0);
+			const Vector2 reflectionUv = environmentUv(reflection);
 			const Color environmentSample0 = sampleTextureBilinearFrom(
 				m_filteredEnvironmentLevels[environmentLevel0],
 				m_filteredEnvironmentWidths[environmentLevel0],
-				m_filteredEnvironmentHeights[environmentLevel0], Vector2(u, v));
+				m_filteredEnvironmentHeights[environmentLevel0], reflectionUv);
 			const Color environmentSample1 = sampleTextureBilinearFrom(
 				m_filteredEnvironmentLevels[environmentLevel1],
 				m_filteredEnvironmentWidths[environmentLevel1],
-				m_filteredEnvironmentHeights[environmentLevel1], Vector2(u, v));
+				m_filteredEnvironmentHeights[environmentLevel1], reflectionUv);
 			const Color environmentSample = Color::lerp(
 				environmentSample0, environmentSample1, environmentLevelBlend);
-			environment = Vector3(environmentSample.r, environmentSample.g, environmentSample.b) *
+			specularEnvironment = Vector3(environmentSample.r, environmentSample.g, environmentSample.b) *
 				m_environmentIntensity;
+
+			const float wx = std::fabs(shadingNormal.x);
+			const float wy = std::fabs(shadingNormal.y);
+			const float wz = std::fabs(shadingNormal.z);
+			const float weightSum = std::max(1e-6f, wx + wy + wz);
+			diffuseEnvironment = (
+				m_environmentDiffuseAxes[shadingNormal.x >= 0.0f ? 0 : 1] * wx +
+				m_environmentDiffuseAxes[shadingNormal.y >= 0.0f ? 2 : 3] * wy +
+				m_environmentDiffuseAxes[shadingNormal.z >= 0.0f ? 4 : 5] * wz) *
+				(m_environmentIntensity / weightSum);
 		}
+		const float environmentFresnelFactor = std::pow(1.0f - nDotV, 5.0f);
+		const Vector3 environmentFresnel = f0 +
+			(Vector3(1.0f - roughness, 1.0f - roughness, 1.0f - roughness) - f0) *
+			environmentFresnelFactor;
 		Vector3 totalLight = m_ambient * m_material.ambient *
 			(baseColor * (1.0f - metallic) + f0 * 0.8f) +
-			environment * (baseColor * (1.0f - metallic) + f0);
+			diffuseEnvironment * baseColor * (1.0f - metallic) +
+			specularEnvironment * environmentFresnel;
 
 		for (const auto& light : m_lights) {
 			Vector3 lightDir;
@@ -508,11 +588,15 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		Vector3 result = totalLight + m_material.emission;
 		if (m_toneMappingEnabled) {
 			const Vector3 exposed = result * m_exposure;
-			// Exponential filmic approximation followed by sRGB-like gamma.
+			// ACES fitted curve retains highlight shape better than the previous
+			// exponential mapping, especially on brushed metal.
 			result = Vector3(
-				1.0f - std::exp(-std::max(0.0f, exposed.x)),
-				1.0f - std::exp(-std::max(0.0f, exposed.y)),
-				1.0f - std::exp(-std::max(0.0f, exposed.z))
+				(exposed.x * (2.51f * exposed.x + 0.03f)) /
+					(exposed.x * (2.43f * exposed.x + 0.59f) + 0.14f),
+				(exposed.y * (2.51f * exposed.y + 0.03f)) /
+					(exposed.y * (2.43f * exposed.y + 0.59f) + 0.14f),
+				(exposed.z * (2.51f * exposed.z + 0.03f)) /
+					(exposed.z * (2.43f * exposed.z + 0.59f) + 0.14f)
 			);
 			result = Vector3(
 				std::pow(std::max(0.0f, result.x), 1.0f / 2.2f),

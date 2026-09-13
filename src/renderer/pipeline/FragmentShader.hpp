@@ -86,6 +86,7 @@ namespace ST {
 		Vector3 worldPosition;
 		Vector3 normal;
 		Vector3 tangent;
+		float tangentSign;
 		Vector2 texCoord;
 		Color color;
 	};
@@ -135,8 +136,10 @@ namespace ST {
 		int m_environmentTextureHeight;
 		bool m_hasEnvironmentTexture;
         std::vector<std::vector<Color>> m_filteredEnvironmentLevels;
-        int m_filteredEnvironmentWidths[4];
-        int m_filteredEnvironmentHeights[4];
+        static constexpr int EnvironmentLevelCount = 6;
+        int m_filteredEnvironmentWidths[EnvironmentLevelCount];
+        int m_filteredEnvironmentHeights[EnvironmentLevelCount];
+		Vector3 m_environmentDiffuseAxes[6];
 		Vector3 m_viewPosition;
 
 		const std::vector<Color>* m_texture;

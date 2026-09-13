@@ -14,6 +14,8 @@
 #endif
 
 namespace {
+constexpr int kEnvironmentMaxDimension = 1024;
+
 // Map raw RGBA float pixels into the ABGR byte order that
 // SDL_PIXELFORMAT_RGBA32 expects on this platform.
 inline uint32_t packRGBA(const ST::Color& c) {
@@ -56,8 +58,10 @@ TestModule_3DRender::TestModule_3DRender()
     if (m_selectedShaderIndex >= 0) loadSelectedShader();
     scanTextureCatalog();
     m_environmentTexturePath = "environment/studio_small_01.jpg";
-    if (!m_environmentTexture.load((m_textureRoot + "/" + m_environmentTexturePath).c_str())) {
-        m_environmentTexture.load((std::string("../../Data/Textures/") + m_environmentTexturePath).c_str());
+    if (!m_environmentTexture.load((m_textureRoot + "/" + m_environmentTexturePath).c_str(),
+                                   kEnvironmentMaxDimension)) {
+        m_environmentTexture.load((std::string("../../Data/Textures/") + m_environmentTexturePath).c_str(),
+                                  kEnvironmentMaxDimension);
     }
     scanModelCatalog();
     // The generated default scene is a clean starting point; only user
@@ -1023,7 +1027,8 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
             m_exposure = std::clamp(lighting.value("exposure", m_exposure), 0.0f, 5.0f);
             const std::string environmentMap = lighting.value("environmentMap", m_environmentTexturePath);
             if (!environmentMap.empty()) {
-                m_environmentMapEnabled = m_environmentTexture.load((m_textureRoot + "/" + environmentMap).c_str());
+                m_environmentMapEnabled = m_environmentTexture.load(
+                    (m_textureRoot + "/" + environmentMap).c_str(), kEnvironmentMaxDimension);
                 if (m_environmentMapEnabled) m_environmentTexturePath = environmentMap;
             } else {
                 m_environmentMapEnabled = false;
@@ -1617,6 +1622,10 @@ bool TestModule_3DRender::renderControls() {
         editedMaterial = &m_sceneObjects[m_selectedSceneObject].material;
     }
     const ImGuiTreeNodeFlags defaultOpen = ImGuiTreeNodeFlags_DefaultOpen;
+    changed |= ImGui::Checkbox("Clean preview", &m_cleanPreview);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Hide selection bounds and editor gizmos without changing their saved visibility settings.");
+    }
     if (ImGui::CollapsingHeader("Selected Object", defaultOpen)) {
         changed |= renderSceneObjectControls();
     }
@@ -1970,7 +1979,7 @@ void TestModule_3DRender::drawSelectionOutline(SDL_Renderer* renderer,
                                                const ST::Matrix4x4& view,
                                                const ST::Matrix4x4& projection,
                                                const ST::Matrix4x4& model) {
-    if (!renderer || !m_showSelectionOutline || m_selectedSceneObject < 0 ||
+    if (!renderer || m_cleanPreview || !m_showSelectionOutline || m_selectedSceneObject < 0 ||
         m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
     const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
     if (!object.visible || !object.model) return;
@@ -2018,7 +2027,7 @@ void TestModule_3DRender::drawTransformGizmo(SDL_Renderer* renderer,
                                              const ST::Matrix4x4& projection,
                                              const ST::Matrix4x4& model) {
     m_transformGizmoValid = false;
-    if (!renderer || !m_showTransformGizmo || m_selectedSceneObject < 0 ||
+    if (!renderer || m_cleanPreview || !m_showTransformGizmo || m_selectedSceneObject < 0 ||
         m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return;
     const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
     if (!object.visible || !object.model) return;
@@ -2079,7 +2088,7 @@ void TestModule_3DRender::drawLightGizmo(SDL_Renderer* renderer,
                                         const ST::Matrix4x4& projection,
                                         const ST::Matrix4x4& model)
 {
-    if (!renderer || !m_showLightGizmo || !m_lightingEnabled) return;
+    if (!renderer || m_cleanPreview || !m_showLightGizmo || !m_lightingEnabled) return;
 
     const ST::ModelAsset* activeModel = getActiveModel();
     const ST::Vector3 center = activeModel
@@ -2324,7 +2333,7 @@ void TestModule_3DRender::onWheel(float /*dx*/, float dy,
 // cares about deltas, so screen-space (x,y) and canvas-space (cx,cy) are
 // interchangeable here.
 void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY) {
-    if (button == SDL_BUTTON_LEFT && m_transformGizmoValid && m_showTransformGizmo &&
+    if (button == SDL_BUTTON_LEFT && !m_cleanPreview && m_transformGizmoValid && m_showTransformGizmo &&
         m_selectedSceneObject >= 0) {
         float bestDistanceSquared = 10.0f * 10.0f;
         int bestAxis = -1;
@@ -2359,7 +2368,7 @@ void TestModule_3DRender::onCanvasMouseDown(int button, int canvasX, int canvasY
             return;
         }
     }
-    if (button == SDL_BUTTON_LEFT && m_showLightGizmo && m_lightingEnabled) {
+    if (button == SDL_BUTTON_LEFT && !m_cleanPreview && m_showLightGizmo && m_lightingEnabled) {
         const float dx = static_cast<float>(canvasX - m_lightGizmoScreenX);
         const float dy = static_cast<float>(canvasY - m_lightGizmoScreenY);
         if (dx * dx + dy * dy <= m_lightGizmoHitRadius * m_lightGizmoHitRadius) {

@@ -153,6 +153,11 @@ bool AssimpModelLoader::load(const std::string& path,
             vertex.tangent = source->HasTangentsAndBitangents()
                 ? toVector(source->mTangents[vertexIndex]).normalized()
                 : Vector3(1.0f, 0.0f, 0.0f);
+            if (source->HasTangentsAndBitangents()) {
+                const Vector3 bitangent = toVector(source->mBitangents[vertexIndex]).normalized();
+                vertex.tangentSign = vertex.normal.cross(vertex.tangent).dot(bitangent) < 0.0f
+                    ? -1.0f : 1.0f;
+            }
             if (source->HasTextureCoords(0)) {
                 vertex.texCoord = Vector2(source->mTextureCoords[0][vertexIndex].x,
                                           source->mTextureCoords[0][vertexIndex].y);

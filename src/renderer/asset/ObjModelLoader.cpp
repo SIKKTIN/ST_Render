@@ -120,6 +120,7 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
     std::vector<bool> hasNormal;
     std::vector<Vector3> accumulatedNormals;
     std::vector<Vector3> accumulatedTangents;
+    std::vector<Vector3> accumulatedBitangents;
     std::string line;
     int lineNumber = 0;
 
@@ -148,6 +149,7 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
         hasNormal.push_back(source.normal != 0);
         accumulatedNormals.emplace_back(Vector3::zero());
         accumulatedTangents.emplace_back(Vector3::zero());
+        accumulatedBitangents.emplace_back(Vector3::zero());
         return true;
     };
 
@@ -230,9 +232,13 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
                 if (std::fabs(denominator) > 1e-8f) {
                     const float inverse = 1.0f / denominator;
                     const Vector3 tangent = (edge1 * uv2.y - edge2 * uv1.y) * inverse;
+                    const Vector3 bitangent = (edge2 * uv1.x - edge1 * uv2.x) * inverse;
                     accumulatedTangents[i0] += tangent;
                     accumulatedTangents[i1] += tangent;
                     accumulatedTangents[i2] += tangent;
+                    accumulatedBitangents[i0] += bitangent;
+                    accumulatedBitangents[i1] += bitangent;
+                    accumulatedBitangents[i2] += bitangent;
                 }
             }
         }
@@ -302,6 +308,10 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
         vertices[i].tangent = tangent.lengthSquared() > 1e-8f
             ? tangent.normalized()
             : Vector3(1.0f, 0.0f, 0.0f);
+        const Vector3& bitangent = accumulatedBitangents[i];
+        vertices[i].tangentSign = bitangent.lengthSquared() > 1e-8f &&
+            vertices[i].normal.cross(vertices[i].tangent).dot(bitangent) < 0.0f
+            ? -1.0f : 1.0f;
     }
 
     Vector3 minValue(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max());

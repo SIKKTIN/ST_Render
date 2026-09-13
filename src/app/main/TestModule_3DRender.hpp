@@ -207,6 +207,9 @@ private:
     TransformTool m_transformTool = TransformTool::Translate;
     bool m_showTransformGizmo = true;
     bool m_showSelectionOutline = true;
+    // Presentation mode keeps editor helpers out of captures without
+    // overwriting the user's individual gizmo visibility preferences.
+    bool m_cleanPreview = false;
     int m_transformGizmoAxis = -1;
     int m_transformGizmoCenterX = 0;
     int m_transformGizmoCenterY = 0;

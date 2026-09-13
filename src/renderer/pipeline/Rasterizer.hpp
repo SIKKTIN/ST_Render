@@ -172,6 +172,8 @@ public:
                         frag.position = Vector4((float)x, (float)y, depth, 1.0f);
                         frag.worldPosition = perspectiveCorrect<Vector3>(bary, v0.worldPosition, v1.worldPosition, v2.worldPosition, w0, w1, w2);
                         frag.normal = perspectiveCorrect<Vector3>(bary, v0.normal, v1.normal, v2.normal, w0, w1, w2).normalized();
+                        frag.tangent = perspectiveCorrect<Vector3>(bary, v0.tangent, v1.tangent, v2.tangent, w0, w1, w2).normalized();
+                        frag.tangentSign = perspectiveCorrect<float>(bary, v0.tangentSign, v1.tangentSign, v2.tangentSign, w0, w1, w2);
                         frag.texCoord = perspectiveCorrect<Vector2>(bary, v0.texCoord, v1.texCoord, v2.texCoord, w0, w1, w2);
 						frag.varyingCount = std::max({ v0.varyingCount, v1.varyingCount, v2.varyingCount });
 						for (size_t varying = 0; varying < static_cast<size_t>(frag.varyingCount); ++varying) {
