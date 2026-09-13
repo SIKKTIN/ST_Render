@@ -119,6 +119,7 @@ private:
     bool createSceneObject(int modelIndex);
     bool replaceSceneObjectModel(int objectIndex, int modelIndex);
     bool loadDiffuseTextureForObject(int objectIndex, int textureIndex);
+    bool loadScalarTextureForObject(int objectIndex, int textureIndex, bool metallic);
     void duplicateSelectedSceneObject();
     void deleteSelectedSceneObject();
     void selectSceneObject(int objectIndex);
@@ -182,6 +183,10 @@ private:
         std::shared_ptr<ST::ModelAsset> model;
         ST::Image diffuseTexture;
         std::string diffuseTexturePath;
+        ST::Image roughnessTexture;
+        std::string roughnessTexturePath;
+        ST::Image metallicTexture;
+        std::string metallicTexturePath;
         ST::Material material = ST::Material::defaultMaterial();
         std::string textureStatus;
         ST::Vector3 position = ST::Vector3::zero();

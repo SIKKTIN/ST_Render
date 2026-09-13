@@ -10,7 +10,13 @@ namespace ST {
         : m_ambient(0.1f, 0.1f, 0.1f)
         , m_textureWidth(0)
         , m_textureHeight(0)
-        , m_hasTexture(false) {
+        , m_hasTexture(false)
+        , m_roughnessTextureWidth(0)
+        , m_roughnessTextureHeight(0)
+        , m_hasRoughnessTexture(false)
+        , m_metallicTextureWidth(0)
+        , m_metallicTextureHeight(0)
+        , m_hasMetallicTexture(false) {
         m_material = Material::defaultMaterial();
         m_viewPosition = Vector3(0, 0, 5);
     }
@@ -42,6 +48,35 @@ namespace ST {
 		m_textureHeight = height;
 		m_hasTexture = !texture.empty();
 	}
+
+	void FragmentShader::setRoughnessTexture(const std::vector<Color>& texture, int width, int height) {
+		m_roughnessTexture = texture;
+		m_roughnessTextureWidth = width;
+		m_roughnessTextureHeight = height;
+		m_hasRoughnessTexture = !texture.empty() && width > 0 && height > 0;
+	}
+
+	void FragmentShader::setMetallicTexture(const std::vector<Color>& texture, int width, int height) {
+		m_metallicTexture = texture;
+		m_metallicTextureWidth = width;
+		m_metallicTextureHeight = height;
+		m_hasMetallicTexture = !texture.empty() && width > 0 && height > 0;
+	}
+
+	namespace {
+	float sampleScalarMap(const std::vector<Color>& texture, int width, int height,
+	                     const Vector2& uv, bool enabled) {
+		if (!enabled || texture.empty() || width <= 0 || height <= 0) return 1.0f;
+		float u = std::fmod(uv.x, 1.0f);
+		float v = std::fmod(uv.y, 1.0f);
+		if (u < 0.0f) u += 1.0f;
+		if (v < 0.0f) v += 1.0f;
+		const int x = std::clamp(static_cast<int>(u * width), 0, width - 1);
+		const int y = std::clamp(static_cast<int>(v * height), 0, height - 1);
+		const Color& sample = texture[y * width + x];
+		return (sample.r + sample.g + sample.b) / 3.0f;
+	}
+}
 
 	Color FragmentShader::sampleTexture(const Vector2& uv) {
 		return sampleTextureBilinear(uv);
@@ -202,8 +237,12 @@ namespace ST {
 	Color FragmentShader::shadeBlinnPhong(const Fragment& fragment) {
 		Vector3 viewDir = (m_viewPosition - fragment.worldPosition).normalized();
 		Vector3 totalLight = m_ambient * m_material.ambient;
-		const float metallic = clamp(m_material.metallicFactor, 0.0f, 1.0f);
-		const float roughness = clamp(m_material.roughness, 0.02f, 1.0f);
+		const float metallicMap = sampleScalarMap(m_metallicTexture, m_metallicTextureWidth,
+			m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture);
+		const float roughnessMap = sampleScalarMap(m_roughnessTexture, m_roughnessTextureWidth,
+			m_roughnessTextureHeight, fragment.texCoord, m_hasRoughnessTexture);
+		const float metallic = clamp(m_material.metallicFactor * metallicMap, 0.0f, 1.0f);
+		const float roughness = clamp(m_material.roughness * roughnessMap, 0.02f, 1.0f);
 		const float specularPower = std::max(1.0f,
 			(1.0f - roughness) * (1.0f - roughness) * 256.0f);
 		const Vector3 specularColor =

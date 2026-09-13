@@ -107,6 +107,8 @@ namespace ST {
 		Color shadeBlinnPhong(const Fragment& fragment);
 
 		void setTexture(const std::vector<Color>& texture, int width, int height);
+		void setRoughnessTexture(const std::vector<Color>& texture, int width, int height);
+		void setMetallicTexture(const std::vector<Color>& texture, int width, int height);
 		Color sampleTexture(const Vector2& uv);
 		Color sampleTextureBilinear(const Vector2& uv);
 		Color sampleTextureClamp(const Vector2& uv);
@@ -120,6 +122,14 @@ namespace ST {
 		int m_textureWidth;
 		int m_textureHeight;
 		bool m_hasTexture;
+		std::vector<Color> m_roughnessTexture;
+		int m_roughnessTextureWidth;
+		int m_roughnessTextureHeight;
+		bool m_hasRoughnessTexture;
+		std::vector<Color> m_metallicTexture;
+		int m_metallicTextureWidth;
+		int m_metallicTextureHeight;
+		bool m_hasMetallicTexture;
 
 		Color lerpColor(const Color& a, const Color& b, float t);
 		Vector3 lerpVector3(const Vector3& a, const Vector3& b, float t);

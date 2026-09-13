@@ -228,6 +228,31 @@ bool TestModule_3DRender::loadDiffuseTextureForObject(int objectIndex, int textu
     return true;
 }
 
+bool TestModule_3DRender::loadScalarTextureForObject(int objectIndex, int textureIndex, bool metallic) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return false;
+    SceneObject& object = m_sceneObjects[objectIndex];
+    ST::Image& image = metallic ? object.metallicTexture : object.roughnessTexture;
+    std::string& path = metallic ? object.metallicTexturePath : object.roughnessTexturePath;
+    const char* label = metallic ? "Metallic" : "Roughness";
+    if (textureIndex < 0) {
+        image.clear();
+        path.clear();
+        needsRerender = true;
+        return true;
+    }
+
+    const auto& entries = m_textureCatalog.getEntries();
+    if (textureIndex >= static_cast<int>(entries.size()) ||
+        !image.load(entries[textureIndex].absolutePath.c_str())) {
+        return false;
+    }
+    path = entries[textureIndex].relativePath;
+    object.textureStatus = std::string(label) + " texture: " + path;
+    m_modelTextureStatus = object.textureStatus;
+    needsRerender = true;
+    return true;
+}
+
 bool TestModule_3DRender::loadSelectedModel() {
     const auto& entries = m_modelCatalog.getEntries();
     if (m_selectedModelIndex < 0 || m_selectedModelIndex >= static_cast<int>(entries.size())) {
@@ -265,6 +290,10 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
     object.material = ST::Material::defaultMaterial();
     object.diffuseTexture.clear();
     object.diffuseTexturePath.clear();
+    object.roughnessTexture.clear();
+    object.roughnessTexturePath.clear();
+    object.metallicTexture.clear();
+    object.metallicTexturePath.clear();
     object.textureStatus.clear();
     m_modelError.clear();
 
@@ -530,6 +559,8 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "name", object.name },
             { "model", object.modelPath },
             { "diffuseTexture", object.diffuseTexturePath },
+            { "roughnessTexture", object.roughnessTexturePath },
+            { "metallicTexture", object.metallicTexturePath },
             { "visible", object.visible },
             { "position", vectorJson(object.position) },
             { "rotation", vectorJson(object.rotation) },
@@ -683,6 +714,30 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                     }
                 }
             }
+            auto restoreScalarTexture = [&](const char* key, ST::Image& image, std::string& storedPath) {
+                if (!savedObject.contains(key)) return;
+                const std::string texturePath = savedObject.value(key, std::string());
+                if (texturePath.empty()) {
+                    image.clear();
+                    storedPath.clear();
+                    return;
+                }
+                const int textureIndex = m_textureCatalog.findByRelativePath(texturePath);
+                const std::string resolvedPath = textureIndex >= 0
+                    ? m_textureCatalog.getEntries()[textureIndex].absolutePath
+                    : texturePath;
+                if (image.load(resolvedPath.c_str())) {
+                    storedPath = textureIndex >= 0
+                        ? m_textureCatalog.getEntries()[textureIndex].relativePath
+                        : texturePath;
+                } else {
+                    m_sceneWarning = std::string(key) + " not found: " + texturePath;
+                }
+            };
+            restoreScalarTexture("roughnessTexture", m_sceneObjects.back().roughnessTexture,
+                                 m_sceneObjects.back().roughnessTexturePath);
+            restoreScalarTexture("metallicTexture", m_sceneObjects.back().metallicTexture,
+                                 m_sceneObjects.back().metallicTexturePath);
             maxId = std::max(maxId, m_sceneObjects.back().id);
         }
 
@@ -849,6 +904,20 @@ void TestModule_3DRender::bindSceneObjectMaterial(int objectIndex) {
                                     object.diffuseTexture.getHeight());
     } else {
         m_fragmentShader.setTexture({}, 0, 0);
+    }
+    if (object.roughnessTexture.isValid()) {
+        m_fragmentShader.setRoughnessTexture(object.roughnessTexture.getPixels(),
+                                              object.roughnessTexture.getWidth(),
+                                              object.roughnessTexture.getHeight());
+    } else {
+        m_fragmentShader.setRoughnessTexture({}, 0, 0);
+    }
+    if (object.metallicTexture.isValid()) {
+        m_fragmentShader.setMetallicTexture(object.metallicTexture.getPixels(),
+                                            object.metallicTexture.getWidth(),
+                                            object.metallicTexture.getHeight());
+    } else {
+        m_fragmentShader.setMetallicTexture({}, 0, 0);
     }
 }
 
@@ -1211,6 +1280,32 @@ bool TestModule_3DRender::renderControls() {
         if (!selectedObject.diffuseTexturePath.empty()) {
             ImGui::TextDisabled("%s", selectedObject.diffuseTexturePath.c_str());
         }
+        auto scalarTextureCombo = [&](const char* label, std::string& path, bool metallic) {
+            const int selectedMap = m_textureCatalog.findByRelativePath(path);
+            const char* preview = selectedMap >= 0
+                ? m_textureCatalog.getEntries()[selectedMap].displayName.c_str()
+                : (path.empty() ? "None (uniform value)" : "External texture");
+            if (ImGui::BeginCombo(label, preview)) {
+                const bool noneSelected = path.empty();
+                if (ImGui::Selectable("None (uniform value)", noneSelected)) {
+                    if (loadScalarTextureForObject(m_selectedSceneObject, -1, metallic)) changed = true;
+                }
+                if (noneSelected) ImGui::SetItemDefaultFocus();
+                for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
+                    const auto& entry = m_textureCatalog.getEntries()[i];
+                    const bool isSelected = i == selectedMap;
+                    if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
+                        if (loadScalarTextureForObject(m_selectedSceneObject, i, metallic)) changed = true;
+                    }
+                    if (isSelected) ImGui::SetItemDefaultFocus();
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+                }
+                ImGui::EndCombo();
+            }
+            if (!path.empty()) ImGui::TextDisabled("%s", path.c_str());
+        };
+        scalarTextureCombo("Roughness texture", selectedObject.roughnessTexturePath, false);
+        scalarTextureCombo("Metallic texture", selectedObject.metallicTexturePath, true);
         if (ImGui::Button("Refresh texture list")) {
             scanTextureCatalog();
             changed = true;
