@@ -53,6 +53,7 @@ TestModule_3DRender::TestModule_3DRender()
     m_activeShader = m_builtinShader;
     scanShaderCatalog();
     if (m_selectedShaderIndex >= 0) loadSelectedShader();
+    scanTextureCatalog();
     scanModelCatalog();
     // The generated default scene is a clean starting point; only user
     // edits should add the unsaved marker.
@@ -191,6 +192,42 @@ void TestModule_3DRender::scanModelCatalog() {
     }
 }
 
+void TestModule_3DRender::scanTextureCatalog() {
+    std::string error;
+    if (m_textureCatalog.scan(m_textureRoot, error)) return;
+
+    const std::string fallback = "../../Data/Models";
+    if (m_textureCatalog.scan(fallback, error)) {
+        m_textureRoot = fallback;
+    }
+}
+
+bool TestModule_3DRender::loadDiffuseTextureForObject(int objectIndex, int textureIndex) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return false;
+    SceneObject& object = m_sceneObjects[objectIndex];
+    if (textureIndex < 0) {
+        object.diffuseTexture.clear();
+        object.diffuseTexturePath.clear();
+        object.textureStatus = "Diffuse texture disabled; using material color";
+        m_modelTextureStatus = object.textureStatus;
+        needsRerender = true;
+        return true;
+    }
+
+    const auto& entries = m_textureCatalog.getEntries();
+    if (textureIndex >= static_cast<int>(entries.size())) return false;
+    if (!object.diffuseTexture.load(entries[textureIndex].absolutePath.c_str())) {
+        object.textureStatus = "Diffuse texture failed to load: " + entries[textureIndex].relativePath;
+        m_modelTextureStatus = object.textureStatus;
+        return false;
+    }
+    object.diffuseTexturePath = entries[textureIndex].relativePath;
+    object.textureStatus = "Diffuse texture: " + object.diffuseTexturePath;
+    m_modelTextureStatus = object.textureStatus;
+    needsRerender = true;
+    return true;
+}
+
 bool TestModule_3DRender::loadSelectedModel() {
     const auto& entries = m_modelCatalog.getEntries();
     if (m_selectedModelIndex < 0 || m_selectedModelIndex >= static_cast<int>(entries.size())) {
@@ -227,6 +264,7 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
     }
     object.material = ST::Material::defaultMaterial();
     object.diffuseTexture.clear();
+    object.diffuseTexturePath.clear();
     object.textureStatus.clear();
     m_modelError.clear();
 
@@ -243,7 +281,11 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
             object.material.shininess = std::max(1.0f, material.shininess);
             if (!material.diffuseTexturePath.empty()) {
                 if (object.diffuseTexture.load(material.diffuseTexturePath.c_str())) {
-                    object.textureStatus = "Diffuse texture: " + material.diffuseTexturePath;
+                    const int textureIndex = m_textureCatalog.findByRelativePath(material.diffuseTexturePath);
+                    object.diffuseTexturePath = textureIndex >= 0
+                        ? m_textureCatalog.getEntries()[textureIndex].relativePath
+                        : material.diffuseTexturePath;
+                    object.textureStatus = "Diffuse texture: " + object.diffuseTexturePath;
                 } else {
                     object.textureStatus = "Diffuse texture missing: " + material.diffuseTexturePath;
                 }
@@ -487,6 +529,7 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "id", object.id },
             { "name", object.name },
             { "model", object.modelPath },
+            { "diffuseTexture", object.diffuseTexturePath },
             { "visible", object.visible },
             { "position", vectorJson(object.position) },
             { "rotation", vectorJson(object.rotation) },
@@ -618,6 +661,27 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                 m_sceneObjects.back().material.metallicFactor = std::clamp(material.value("metallic", 0.0f), 0.0f, 1.0f);
                 m_sceneObjects.back().material.roughness = std::clamp(material.value("roughness", 0.5f), 0.02f, 1.0f);
                 if (material.contains("emission")) m_sceneObjects.back().material.emission = readVector(material["emission"], "material emission");
+            }
+            if (savedObject.contains("diffuseTexture")) {
+                const std::string texturePath = savedObject.value("diffuseTexture", std::string());
+                if (texturePath.empty()) {
+                    m_sceneObjects.back().diffuseTexture.clear();
+                    m_sceneObjects.back().diffuseTexturePath.clear();
+                    m_sceneObjects.back().textureStatus = "Diffuse texture disabled; using material color";
+                } else {
+                    const int textureIndex = m_textureCatalog.findByRelativePath(texturePath);
+                    const std::string resolvedPath = textureIndex >= 0
+                        ? m_textureCatalog.getEntries()[textureIndex].absolutePath
+                        : texturePath;
+                    if (!m_sceneObjects.back().diffuseTexture.load(resolvedPath.c_str())) {
+                        m_sceneWarning = "Diffuse texture not found: " + texturePath;
+                    } else {
+                        m_sceneObjects.back().diffuseTexturePath = textureIndex >= 0
+                            ? m_textureCatalog.getEntries()[textureIndex].relativePath
+                            : texturePath;
+                        m_sceneObjects.back().textureStatus = "Diffuse texture: " + m_sceneObjects.back().diffuseTexturePath;
+                    }
+                }
             }
             maxId = std::max(maxId, m_sceneObjects.back().id);
         }
@@ -1119,6 +1183,39 @@ bool TestModule_3DRender::renderControls() {
     changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
     changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
+    if (m_selectedSceneObject >= 0 &&
+        m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
+        SceneObject& selectedObject = m_sceneObjects[m_selectedSceneObject];
+        const int selectedTexture = m_textureCatalog.findByRelativePath(selectedObject.diffuseTexturePath);
+        const char* texturePreview = selectedTexture >= 0
+            ? m_textureCatalog.getEntries()[selectedTexture].displayName.c_str()
+            : (selectedObject.diffuseTexturePath.empty() ? "None (material color)" : "External texture");
+        if (ImGui::BeginCombo("Base Color texture", texturePreview)) {
+            const bool noneSelected = selectedObject.diffuseTexturePath.empty();
+            if (ImGui::Selectable("None (material color)", noneSelected)) {
+                loadDiffuseTextureForObject(m_selectedSceneObject, -1);
+                changed = true;
+            }
+            if (noneSelected) ImGui::SetItemDefaultFocus();
+            for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
+                const auto& entry = m_textureCatalog.getEntries()[i];
+                const bool isSelected = i == selectedTexture;
+                if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
+                    if (loadDiffuseTextureForObject(m_selectedSceneObject, i)) changed = true;
+                }
+                if (isSelected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+            }
+            ImGui::EndCombo();
+        }
+        if (!selectedObject.diffuseTexturePath.empty()) {
+            ImGui::TextDisabled("%s", selectedObject.diffuseTexturePath.c_str());
+        }
+        if (ImGui::Button("Refresh texture list")) {
+            scanTextureCatalog();
+            changed = true;
+        }
+    }
     ImGui::Separator();
     ImGui::TextDisabled("Advanced lighting");
     changed |= ImGui::ColorEdit3("Ambient", &editedMaterial->ambient.x);

@@ -2,6 +2,7 @@
 add_library(Asset
     ObjModelLoader.cpp
     ModelCatalog.cpp
+    TextureCatalog.cpp
 )
 target_include_directories(Asset PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../..

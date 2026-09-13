@@ -11,6 +11,7 @@
 #include "renderer/shader/ShaderProgram.hpp"
 #include "renderer/asset/ModelAsset.hpp"
 #include "renderer/asset/ModelCatalog.hpp"
+#include "renderer/asset/TextureCatalog.hpp"
 #include "renderer/asset/ObjModelLoader.hpp"
 #include "core/texture/ST_Image.hpp"
 #include "renderer/geometry/Vertex.hpp"
@@ -44,6 +45,7 @@ public:
     bool selectShaderIndex(int index);
     void useBuiltinShader();
     const std::vector<ST::ModelEntry>& getModelEntries() const { return m_modelCatalog.getEntries(); }
+    const std::vector<ST::TextureEntry>& getTextureEntries() const { return m_textureCatalog.getEntries(); }
     int getSelectedModelIndex() const { return m_selectedModelIndex; }
     const std::string& getModelError() const { return m_modelError; }
     const std::string& getModelTextureStatus() const { return m_modelTextureStatus; }
@@ -110,11 +112,13 @@ private:
     void pollShaderReload();
     bool renderShaderControls();
     void scanModelCatalog();
+    void scanTextureCatalog();
     bool loadSelectedModel();
     bool renderModelControls();
     bool renderSceneObjectControls();
     bool createSceneObject(int modelIndex);
     bool replaceSceneObjectModel(int objectIndex, int modelIndex);
+    bool loadDiffuseTextureForObject(int objectIndex, int textureIndex);
     void duplicateSelectedSceneObject();
     void deleteSelectedSceneObject();
     void selectSceneObject(int objectIndex);
@@ -177,6 +181,7 @@ private:
         std::string modelPath;
         std::shared_ptr<ST::ModelAsset> model;
         ST::Image diffuseTexture;
+        std::string diffuseTexturePath;
         ST::Material material = ST::Material::defaultMaterial();
         std::string textureStatus;
         ST::Vector3 position = ST::Vector3::zero();
@@ -194,9 +199,11 @@ private:
     bool m_sceneDirty = false;
     std::string m_sceneWarning;
     ST::ModelCatalog m_modelCatalog;
+    ST::TextureCatalog m_textureCatalog;
     int m_selectedModelIndex = -1;
     std::string m_modelError;
     std::string m_modelRoot = "Data/Models";
+    std::string m_textureRoot = "Data/Models";
     std::string m_modelTextureStatus;
     ST::ShaderCatalog m_shaderCatalog;
     ST::ShaderManager m_shaderManager;
