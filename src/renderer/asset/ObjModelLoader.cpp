@@ -119,6 +119,7 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
     std::unordered_map<ObjIndex, int, ObjIndexHash> vertexMap;
     std::vector<bool> hasNormal;
     std::vector<Vector3> accumulatedNormals;
+    std::vector<Vector3> accumulatedTangents;
     std::string line;
     int lineNumber = 0;
 
@@ -146,6 +147,7 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
         vertexMap.emplace(source, outputIndex);
         hasNormal.push_back(source.normal != 0);
         accumulatedNormals.emplace_back(Vector3::zero());
+        accumulatedTangents.emplace_back(Vector3::zero());
         return true;
     };
 
@@ -219,6 +221,19 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
                 if (!hasNormal[i0]) accumulatedNormals[i0] += faceNormal;
                 if (!hasNormal[i1]) accumulatedNormals[i1] += faceNormal;
                 if (!hasNormal[i2]) accumulatedNormals[i2] += faceNormal;
+
+                const Vector3 edge1 = vertices[i1].position - vertices[i0].position;
+                const Vector3 edge2 = vertices[i2].position - vertices[i0].position;
+                const Vector2 uv1 = vertices[i1].texCoord - vertices[i0].texCoord;
+                const Vector2 uv2 = vertices[i2].texCoord - vertices[i0].texCoord;
+                const float denominator = uv1.x * uv2.y - uv1.y * uv2.x;
+                if (std::fabs(denominator) > 1e-8f) {
+                    const float inverse = 1.0f / denominator;
+                    const Vector3 tangent = (edge1 * uv2.y - edge2 * uv1.y) * inverse;
+                    accumulatedTangents[i0] += tangent;
+                    accumulatedTangents[i1] += tangent;
+                    accumulatedTangents[i2] += tangent;
+                }
             }
         }
     }
@@ -232,6 +247,11 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
     for (size_t i = 0; i < vertices.size(); ++i) {
         if (!hasNormal[i]) vertices[i].normal = accumulatedNormals[i].normalized();
         if (vertices[i].normal.lengthSquared() < 1e-8f) vertices[i].normal = Vector3::forward();
+        Vector3 tangent = accumulatedTangents[i];
+        tangent = tangent - vertices[i].normal * vertices[i].normal.dot(tangent);
+        vertices[i].tangent = tangent.lengthSquared() > 1e-8f
+            ? tangent.normalized()
+            : Vector3(1.0f, 0.0f, 0.0f);
     }
 
     Vector3 minValue(std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max());

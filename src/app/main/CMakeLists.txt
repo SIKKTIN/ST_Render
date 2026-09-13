@@ -85,4 +85,12 @@ if(WIN32)
         COMMENT "Copying model assets"
         VERBATIM
     )
+
+    add_custom_command(TARGET ST_Render_Manager POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/Data/Textures"
+            $<TARGET_FILE_DIR:ST_Render_Manager>/Data/Textures
+        COMMENT "Copying texture assets"
+        VERBATIM
+    )
 endif()

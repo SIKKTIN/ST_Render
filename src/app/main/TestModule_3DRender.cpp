@@ -196,7 +196,7 @@ void TestModule_3DRender::scanTextureCatalog() {
     std::string error;
     if (m_textureCatalog.scan(m_textureRoot, error)) return;
 
-    const std::string fallback = "../../Data/Models";
+    const std::string fallback = "../../Data/Textures";
     if (m_textureCatalog.scan(fallback, error)) {
         m_textureRoot = fallback;
     }
@@ -253,6 +253,60 @@ bool TestModule_3DRender::loadScalarTextureForObject(int objectIndex, int textur
     return true;
 }
 
+bool TestModule_3DRender::loadNormalTextureForObject(int objectIndex, int textureIndex) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return false;
+    SceneObject& object = m_sceneObjects[objectIndex];
+    if (textureIndex < 0) {
+        object.normalTexture.clear();
+        object.normalTexturePath.clear();
+        needsRerender = true;
+        return true;
+    }
+    const auto& entries = m_textureCatalog.getEntries();
+    if (textureIndex >= static_cast<int>(entries.size()) ||
+        !object.normalTexture.load(entries[textureIndex].absolutePath.c_str())) {
+        return false;
+    }
+    object.normalTexturePath = entries[textureIndex].relativePath;
+    object.textureStatus = "Normal texture: " + object.normalTexturePath;
+    m_modelTextureStatus = object.textureStatus;
+    needsRerender = true;
+    return true;
+}
+
+bool TestModule_3DRender::selectMaterialTexture(const std::string& slot, int textureIndex) {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return false;
+    bool success = false;
+    if (slot == "diffuse" || slot == "baseColor") {
+        success = loadDiffuseTextureForObject(m_selectedSceneObject, textureIndex);
+    } else if (slot == "roughness") {
+        success = loadScalarTextureForObject(m_selectedSceneObject, textureIndex, false);
+    } else if (slot == "metallic") {
+        success = loadScalarTextureForObject(m_selectedSceneObject, textureIndex, true);
+    } else if (slot == "normal") {
+        success = loadNormalTextureForObject(m_selectedSceneObject, textureIndex);
+    } else {
+        return false;
+    }
+    if (success) {
+        markSceneDirty();
+        needsRerender = true;
+    }
+    return success;
+}
+
+std::string TestModule_3DRender::getSelectedMaterialTexturePath(const std::string& slot) const {
+    if (m_selectedSceneObject < 0 ||
+        m_selectedSceneObject >= static_cast<int>(m_sceneObjects.size())) return {};
+    const SceneObject& object = m_sceneObjects[m_selectedSceneObject];
+    if (slot == "diffuse" || slot == "baseColor") return object.diffuseTexturePath;
+    if (slot == "roughness") return object.roughnessTexturePath;
+    if (slot == "metallic") return object.metallicTexturePath;
+    if (slot == "normal") return object.normalTexturePath;
+    return {};
+}
+
 bool TestModule_3DRender::loadSelectedModel() {
     const auto& entries = m_modelCatalog.getEntries();
     if (m_selectedModelIndex < 0 || m_selectedModelIndex >= static_cast<int>(entries.size())) {
@@ -294,6 +348,8 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
     object.roughnessTexturePath.clear();
     object.metallicTexture.clear();
     object.metallicTexturePath.clear();
+    object.normalTexture.clear();
+    object.normalTexturePath.clear();
     object.textureStatus.clear();
     m_modelError.clear();
 
@@ -543,6 +599,7 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "shininess", m_material.shininess },
             { "metallic", m_material.metallicFactor },
             { "roughness", m_material.roughness },
+            { "normalStrength", m_material.normalStrength },
             { "emission", vectorJson(m_material.emission) }
         } },
         { "shader", (m_selectedShaderIndex >= 0 &&
@@ -561,6 +618,7 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "diffuseTexture", object.diffuseTexturePath },
             { "roughnessTexture", object.roughnessTexturePath },
             { "metallicTexture", object.metallicTexturePath },
+            { "normalTexture", object.normalTexturePath },
             { "visible", object.visible },
             { "position", vectorJson(object.position) },
             { "rotation", vectorJson(object.rotation) },
@@ -572,6 +630,7 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
                 { "shininess", object.material.shininess },
                 { "metallic", object.material.metallicFactor },
                 { "roughness", object.material.roughness },
+                { "normalStrength", object.material.normalStrength },
                 { "emission", vectorJson(object.material.emission) }
             } }
         });
@@ -691,6 +750,7 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                 m_sceneObjects.back().material.shininess = std::clamp(material.value("shininess", 32.0f), 1.0f, 256.0f);
                 m_sceneObjects.back().material.metallicFactor = std::clamp(material.value("metallic", 0.0f), 0.0f, 1.0f);
                 m_sceneObjects.back().material.roughness = std::clamp(material.value("roughness", 0.5f), 0.02f, 1.0f);
+                m_sceneObjects.back().material.normalStrength = std::clamp(material.value("normalStrength", 1.0f), 0.0f, 2.0f);
                 if (material.contains("emission")) m_sceneObjects.back().material.emission = readVector(material["emission"], "material emission");
             }
             if (savedObject.contains("diffuseTexture")) {
@@ -738,6 +798,8 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                                  m_sceneObjects.back().roughnessTexturePath);
             restoreScalarTexture("metallicTexture", m_sceneObjects.back().metallicTexture,
                                  m_sceneObjects.back().metallicTexturePath);
+            restoreScalarTexture("normalTexture", m_sceneObjects.back().normalTexture,
+                                 m_sceneObjects.back().normalTexturePath);
             maxId = std::max(maxId, m_sceneObjects.back().id);
         }
 
@@ -765,6 +827,7 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
             m_material.shininess = std::clamp(material.value("shininess", m_material.shininess), 1.0f, 256.0f);
             m_material.metallicFactor = std::clamp(material.value("metallic", m_material.metallicFactor), 0.0f, 1.0f);
             m_material.roughness = std::clamp(material.value("roughness", m_material.roughness), 0.02f, 1.0f);
+            m_material.normalStrength = std::clamp(material.value("normalStrength", m_material.normalStrength), 0.0f, 2.0f);
             if (material.contains("emission")) m_material.emission = readVector(material["emission"], "material emission");
         }
 
@@ -918,6 +981,13 @@ void TestModule_3DRender::bindSceneObjectMaterial(int objectIndex) {
                                             object.metallicTexture.getHeight());
     } else {
         m_fragmentShader.setMetallicTexture({}, 0, 0);
+    }
+    if (object.normalTexture.isValid()) {
+        m_fragmentShader.setNormalTexture(object.normalTexture.getPixels(),
+                                          object.normalTexture.getWidth(),
+                                          object.normalTexture.getHeight());
+    } else {
+        m_fragmentShader.setNormalTexture({}, 0, 0);
     }
 }
 
@@ -1251,6 +1321,7 @@ bool TestModule_3DRender::renderControls() {
     changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
     changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
     changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
+    changed |= ImGui::SliderFloat("Normal strength", &editedMaterial->normalStrength, 0.0f, 2.0f);
     changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
     if (m_selectedSceneObject >= 0 &&
         m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
@@ -1306,6 +1377,30 @@ bool TestModule_3DRender::renderControls() {
         };
         scalarTextureCombo("Roughness texture", selectedObject.roughnessTexturePath, false);
         scalarTextureCombo("Metallic texture", selectedObject.metallicTexturePath, true);
+        const int selectedNormal = m_textureCatalog.findByRelativePath(selectedObject.normalTexturePath);
+        const char* normalPreview = selectedNormal >= 0
+            ? m_textureCatalog.getEntries()[selectedNormal].displayName.c_str()
+            : (selectedObject.normalTexturePath.empty() ? "None (flat surface normal)" : "External texture");
+        if (ImGui::BeginCombo("Normal texture", normalPreview)) {
+            const bool noneSelected = selectedObject.normalTexturePath.empty();
+            if (ImGui::Selectable("None (flat surface normal)", noneSelected)) {
+                if (loadNormalTextureForObject(m_selectedSceneObject, -1)) changed = true;
+            }
+            if (noneSelected) ImGui::SetItemDefaultFocus();
+            for (int i = 0; i < static_cast<int>(m_textureCatalog.getEntries().size()); ++i) {
+                const auto& entry = m_textureCatalog.getEntries()[i];
+                const bool isSelected = i == selectedNormal;
+                if (ImGui::Selectable(entry.displayName.c_str(), isSelected)) {
+                    if (loadNormalTextureForObject(m_selectedSceneObject, i)) changed = true;
+                }
+                if (isSelected) ImGui::SetItemDefaultFocus();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", entry.relativePath.c_str());
+            }
+            ImGui::EndCombo();
+        }
+        if (!selectedObject.normalTexturePath.empty()) {
+            ImGui::TextDisabled("%s", selectedObject.normalTexturePath.c_str());
+        }
         if (ImGui::Button("Refresh texture list")) {
             scanTextureCatalog();
             changed = true;

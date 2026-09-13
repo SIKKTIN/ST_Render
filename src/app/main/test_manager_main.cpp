@@ -586,6 +586,40 @@ int main(int argc, char* argv[]) {
             };
         }
 
+        if (command == "list_textures" || command == "select_texture") {
+            auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
+            if (!render3D) throw std::runtime_error("3D Render is not selected");
+            if (command == "select_texture") {
+                const std::string slot = params.value("slot", std::string());
+                const int textureIndex = params.value("index", -1);
+                if (!render3D->selectMaterialTexture(slot, textureIndex)) {
+                    throw std::runtime_error("Texture slot or texture index was not found");
+                }
+                runModule(selectedModule);
+            }
+            ST::AppControlBridge::Json textures = ST::AppControlBridge::Json::array();
+            const auto& entries = render3D->getTextureEntries();
+            for (size_t i = 0; i < entries.size(); ++i) {
+                textures.push_back({
+                    { "index", static_cast<int>(i) },
+                    { "name", entries[i].displayName },
+                    { "path", entries[i].relativePath }
+                });
+            }
+            ST::AppControlBridge::Json selectedTextures = {
+                { "diffuse", render3D->getSelectedMaterialTexturePath("diffuse") },
+                { "roughness", render3D->getSelectedMaterialTexturePath("roughness") },
+                { "metallic", render3D->getSelectedMaterialTexturePath("metallic") },
+                { "normal", render3D->getSelectedMaterialTexturePath("normal") }
+            };
+            return ST::AppControlBridge::Json{
+                { "module", "3D Render" },
+                { "textures", textures },
+                { "selectedTextures", selectedTextures },
+                { "selectedObject", render3D->getSelectedSceneObjectIndex() }
+            };
+        }
+
         if (command == "save_scene" || command == "load_scene") {
             auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
             if (!render3D) throw std::runtime_error("3D Render is not selected");

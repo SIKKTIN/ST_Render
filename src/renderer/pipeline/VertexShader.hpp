@@ -49,12 +49,13 @@ namespace ST {
 		Vector4 position;
 		Vector3 worldPosition;
 		Vector3 normal;
+		Vector3 tangent;
 		Vector2 texCoord;
 		std::array<Vector4, MAX_VARYINGS> varyings{};
 		std::array<VaryingInterpolation, MAX_VARYINGS> varyingInterpolation{};
 		int varyingCount = 0;
 
-		VertexOut() : color(0,0,0,1), position(0,0,0,1), worldPosition(0,0,0), normal(0,0,1), texCoord(0,0) {
+		VertexOut() : color(0,0,0,1), position(0,0,0,1), worldPosition(0,0,0), normal(0,0,1), tangent(1,0,0), texCoord(0,0) {
 			varyingInterpolation.fill(VaryingInterpolation::Smooth);
 		}
 
@@ -97,6 +98,7 @@ namespace ST {
 			out.position = uni.getMvpMatrix() * Vector4(vertex.position, 1.0f);
 			out.worldPosition = (uni.getModelMatrix() * Vector4(vertex.position, 1.0f)).toVector3();
 			out.normal = uni.getNormalMatrix().transformDirection(vertex.normal).normalized();
+			out.tangent = uni.getNormalMatrix().transformDirection(vertex.tangent).normalized();
 			out.texCoord = vertex.texCoord;
 			return out;
 		}
@@ -123,6 +125,7 @@ namespace ST {
 		r.position       = a.position       + (b.position       - a.position)       * t;
 		r.worldPosition  = a.worldPosition  + (b.worldPosition  - a.worldPosition)  * t;
 		r.normal         = a.normal         + (b.normal         - a.normal)         * t;
+		r.tangent       = a.tangent       + (b.tangent       - a.tangent)       * t;
 		r.texCoord       = a.texCoord       + (b.texCoord       - a.texCoord)       * t;
 		r.color.r        = a.color.r        + (b.color.r        - a.color.r)        * t;
 		r.color.g        = a.color.g        + (b.color.g        - a.color.g)        * t;

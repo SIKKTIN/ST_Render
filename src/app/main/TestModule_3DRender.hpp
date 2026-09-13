@@ -46,6 +46,8 @@ public:
     void useBuiltinShader();
     const std::vector<ST::ModelEntry>& getModelEntries() const { return m_modelCatalog.getEntries(); }
     const std::vector<ST::TextureEntry>& getTextureEntries() const { return m_textureCatalog.getEntries(); }
+    bool selectMaterialTexture(const std::string& slot, int textureIndex);
+    std::string getSelectedMaterialTexturePath(const std::string& slot) const;
     int getSelectedModelIndex() const { return m_selectedModelIndex; }
     const std::string& getModelError() const { return m_modelError; }
     const std::string& getModelTextureStatus() const { return m_modelTextureStatus; }
@@ -120,6 +122,7 @@ private:
     bool replaceSceneObjectModel(int objectIndex, int modelIndex);
     bool loadDiffuseTextureForObject(int objectIndex, int textureIndex);
     bool loadScalarTextureForObject(int objectIndex, int textureIndex, bool metallic);
+    bool loadNormalTextureForObject(int objectIndex, int textureIndex);
     void duplicateSelectedSceneObject();
     void deleteSelectedSceneObject();
     void selectSceneObject(int objectIndex);
@@ -187,6 +190,8 @@ private:
         std::string roughnessTexturePath;
         ST::Image metallicTexture;
         std::string metallicTexturePath;
+        ST::Image normalTexture;
+        std::string normalTexturePath;
         ST::Material material = ST::Material::defaultMaterial();
         std::string textureStatus;
         ST::Vector3 position = ST::Vector3::zero();
@@ -208,7 +213,7 @@ private:
     int m_selectedModelIndex = -1;
     std::string m_modelError;
     std::string m_modelRoot = "Data/Models";
-    std::string m_textureRoot = "Data/Models";
+    std::string m_textureRoot = "Data/Textures";
     std::string m_modelTextureStatus;
     ST::ShaderCatalog m_shaderCatalog;
     ST::ShaderManager m_shaderManager;

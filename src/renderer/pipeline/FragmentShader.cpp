@@ -16,7 +16,10 @@ namespace ST {
         , m_hasRoughnessTexture(false)
         , m_metallicTextureWidth(0)
         , m_metallicTextureHeight(0)
-        , m_hasMetallicTexture(false) {
+        , m_hasMetallicTexture(false)
+        , m_normalTextureWidth(0)
+        , m_normalTextureHeight(0)
+        , m_hasNormalTexture(false) {
         m_material = Material::defaultMaterial();
         m_viewPosition = Vector3(0, 0, 5);
     }
@@ -63,7 +66,38 @@ namespace ST {
 		m_hasMetallicTexture = !texture.empty() && width > 0 && height > 0;
 	}
 
+	void FragmentShader::setNormalTexture(const std::vector<Color>& texture, int width, int height) {
+		m_normalTexture = texture;
+		m_normalTextureWidth = width;
+		m_normalTextureHeight = height;
+		m_hasNormalTexture = !texture.empty() && width > 0 && height > 0;
+	}
+
 	namespace {
+	Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, int height,
+		const Vector2& uv) {
+		if (texture.empty() || width <= 0 || height <= 0) return Color::white();
+		float u = std::fmod(uv.x, 1.0f);
+		float v = std::fmod(uv.y, 1.0f);
+		if (u < 0.0f) u += 1.0f;
+		if (v < 0.0f) v += 1.0f;
+		const float x = u * static_cast<float>(width) - 0.5f;
+		const float y = v * static_cast<float>(height) - 0.5f;
+		const int x0 = static_cast<int>(std::floor(x));
+		const int y0 = static_cast<int>(std::floor(y));
+		const float fx = x - static_cast<float>(x0);
+		const float fy = y - static_cast<float>(y0);
+		const int xWrapped = ((x0 % width) + width) % width;
+		const int yWrapped = ((y0 % height) + height) % height;
+		const int x1 = (xWrapped + 1) % width;
+		const int y1 = (yWrapped + 1) % height;
+		const Color top = Color::lerp(texture[yWrapped * width + xWrapped],
+			texture[yWrapped * width + x1], fx);
+		const Color bottom = Color::lerp(texture[y1 * width + xWrapped],
+			texture[y1 * width + x1], fx);
+		return Color::lerp(top, bottom, fy);
+	}
+
 	float sampleScalarMap(const std::vector<Color>& texture, int width, int height,
 	                     const Vector2& uv, bool enabled) {
 		if (!enabled || texture.empty() || width <= 0 || height <= 0) return 1.0f;
@@ -153,6 +187,7 @@ namespace ST {
 		return shadeBlinnPhong({
 			vertexOut.worldPosition,
 			vertexOut.normal.normalized(),
+			vertexOut.tangent.normalized(),
 			vertexOut.texCoord,
 			vertexOut.color
 			});
@@ -236,6 +271,19 @@ namespace ST {
 	// Blinn-Phong - Uses half-vector instead of reflection vector
 	Color FragmentShader::shadeBlinnPhong(const Fragment& fragment) {
 		Vector3 viewDir = (m_viewPosition - fragment.worldPosition).normalized();
+		Vector3 shadingNormal = fragment.normal.normalized();
+		if (m_hasNormalTexture) {
+			const Color normalSample = sampleTextureBilinearFrom(m_normalTexture, m_normalTextureWidth,
+				m_normalTextureHeight, fragment.texCoord);
+			const Vector3 tangent = fragment.tangent.normalized();
+			const Vector3 bitangent = shadingNormal.cross(tangent).normalized();
+			const float normalStrength = std::max(0.0f, m_material.normalStrength);
+			const Vector3 tangentNormal((normalSample.r * 2.0f - 1.0f) * normalStrength,
+				(normalSample.g * 2.0f - 1.0f) * normalStrength,
+				normalSample.b * 2.0f - 1.0f);
+			shadingNormal = (tangent * tangentNormal.x + bitangent * tangentNormal.y +
+				shadingNormal * tangentNormal.z).normalized();
+		}
 		Vector3 totalLight = m_ambient * m_material.ambient;
 		const float metallicMap = sampleScalarMap(m_metallicTexture, m_metallicTextureWidth,
 			m_metallicTextureHeight, fragment.texCoord, m_hasMetallicTexture);
@@ -261,13 +309,13 @@ namespace ST {
 				attenuation = 1.0f / (1.0f + light.attenuation * distance * distance);
 			}
 
-			float diff = std::max(0.0f, fragment.normal.dot(lightDir));
+			float diff = std::max(0.0f, shadingNormal.dot(lightDir));
 			Vector3 diffuse = m_material.diffuse * (diff * (1.0f - metallic)) *
 				light.color.rgb * light.intensity * attenuation;
 
 			// Blinn-Phong: use half-vector
 			Vector3 halfDir = (lightDir + viewDir).normalized();
-			float spec = std::pow(std::max(0.0f, fragment.normal.dot(halfDir)), specularPower);
+			float spec = std::pow(std::max(0.0f, shadingNormal.dot(halfDir)), specularPower);
 			Vector3 specular = specularColor * spec * light.color.rgb * light.intensity * attenuation;
 
 			totalLight = totalLight + diffuse + specular;

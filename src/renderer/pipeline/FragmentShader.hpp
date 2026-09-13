@@ -52,6 +52,7 @@ namespace ST {
 		// Blinn-Phong response while script/PBR shaders may consume them directly.
 		float metallicFactor;
 		float roughness;
+		float normalStrength;
 		Vector3 emission;
 
 		static Material defaultMaterial() {
@@ -62,6 +63,7 @@ namespace ST {
 			mat.shininess = 32.0f;
 			mat.metallicFactor = 0.0f;
 			mat.roughness = 0.5f;
+			mat.normalStrength = 1.0f;
 			mat.emission = Vector3::zero();
 			return mat;
 		}
@@ -74,6 +76,7 @@ namespace ST {
 			mat.shininess = 128.0f * (1.0f - roughness);
 			mat.metallicFactor = 1.0f;
 			mat.roughness = std::clamp(roughness, 0.02f, 1.0f);
+			mat.normalStrength = 1.0f;
 			mat.emission = Vector3::zero();
 			return mat;
 		}
@@ -82,6 +85,7 @@ namespace ST {
 	struct Fragment {
 		Vector3 worldPosition;
 		Vector3 normal;
+		Vector3 tangent;
 		Vector2 texCoord;
 		Color color;
 	};
@@ -109,6 +113,7 @@ namespace ST {
 		void setTexture(const std::vector<Color>& texture, int width, int height);
 		void setRoughnessTexture(const std::vector<Color>& texture, int width, int height);
 		void setMetallicTexture(const std::vector<Color>& texture, int width, int height);
+		void setNormalTexture(const std::vector<Color>& texture, int width, int height);
 		Color sampleTexture(const Vector2& uv);
 		Color sampleTextureBilinear(const Vector2& uv);
 		Color sampleTextureClamp(const Vector2& uv);
@@ -130,6 +135,10 @@ namespace ST {
 		int m_metallicTextureWidth;
 		int m_metallicTextureHeight;
 		bool m_hasMetallicTexture;
+		std::vector<Color> m_normalTexture;
+		int m_normalTextureWidth;
+		int m_normalTextureHeight;
+		bool m_hasNormalTexture;
 
 		Color lerpColor(const Color& a, const Color& b, float t);
 		Vector3 lerpVector3(const Vector3& a, const Vector3& b, float t);

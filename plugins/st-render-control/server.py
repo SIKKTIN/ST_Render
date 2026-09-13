@@ -217,6 +217,28 @@ TOOLS: list[dict[str, Any]] = [
         "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
     },
     {
+        "name": "list_textures",
+        "title": "List 3D Render textures",
+        "description": "List repository image assets available for material texture slots.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
+        "name": "select_texture",
+        "title": "Select a material texture",
+        "description": "Assign a repository texture to the selected object's diffuse, roughness, metallic, or normal slot. Use index -1 to clear a slot.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "slot": {"type": "string", "enum": ["diffuse", "baseColor", "roughness", "metallic", "normal"]},
+                "index": {"type": "integer", "minimum": -1}
+            },
+            "required": ["slot", "index"],
+            "additionalProperties": False
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+    },
+    {
         "name": "list_scene_objects",
         "title": "List 3D scene objects",
         "description": "List model objects in the 3D Render scene, including transforms and selection.",
@@ -414,6 +436,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "select_model":
         result = _send_app_command("select_model", arguments)
         return _text_result(f"Selected model index {result.get('selectedModel', '')}.", result)
+    if name == "list_textures":
+        result = _send_app_command("list_textures")
+        return _text_result(f"Found {len(result.get('textures', []))} textures.", result)
+    if name == "select_texture":
+        result = _send_app_command("select_texture", arguments)
+        return _text_result(f"Updated {arguments.get('slot', '')} texture slot.", result)
     if name == "list_scene_objects":
         result = _send_app_command("list_scene_objects")
         return _text_result(f"Found {len(result.get('objects', []))} scene objects.", result)

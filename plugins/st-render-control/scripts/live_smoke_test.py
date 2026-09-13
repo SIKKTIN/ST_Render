@@ -60,6 +60,29 @@ try:
     model_entries = models["structuredContent"]["models"]
     assert model_entries, models
 
+    textures = request("tools/call", {"name": "list_textures", "arguments": {}})
+    texture_entries = textures["structuredContent"]["textures"]
+    assert any(entry["path"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png" for entry in texture_entries), textures
+    normal_entry = next(entry for entry in texture_entries if entry["path"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png")
+    selected_texture = request("tools/call", {
+        "name": "select_texture",
+        "arguments": {"slot": "normal", "index": normal_entry["index"]},
+    })
+    assert not selected_texture.get("isError"), selected_texture
+    assert selected_texture["structuredContent"]["selectedTextures"]["normal"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png", selected_texture
+
+    loaded_pbr = request("tools/call", {
+        "name": "load_scene",
+        "arguments": {"path": "Data/ScenePrefab/metal_plate_02.scene.json"},
+    })
+    assert loaded_pbr["structuredContent"]["objectCount"] == 1, loaded_pbr
+    loaded_maps = request("tools/call", {"name": "list_textures", "arguments": {}})
+    selected_maps = loaded_maps["structuredContent"]["selectedTextures"]
+    assert selected_maps["diffuse"].endswith("metal_plate_02_diff_1k.png"), selected_maps
+    assert selected_maps["roughness"].endswith("metal_plate_02_rough_1k.png"), selected_maps
+    assert selected_maps["metallic"].endswith("metal_plate_02_metal_1k.png"), selected_maps
+    assert selected_maps["normal"].endswith("metal_plate_02_nor_dx_1k.png"), selected_maps
+
     scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
     assert len(scene["structuredContent"]["objects"]) == 1, scene
 
