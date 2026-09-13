@@ -9,15 +9,15 @@
   },
   "lighting": {
     "enabled": true,
-    "ambient": [0.16, 0.16, 0.16],
-    "environmentColor": [0.16, 0.2, 0.28],
-    "environmentIntensity": 0.45,
+    "ambient": [0.14, 0.14, 0.14],
+    "environmentColor": [0.14, 0.17, 0.22],
+    "environmentIntensity": 0.38,
     "toneMapping": true,
-    "exposure": 1.15,
+    "exposure": 1.00,
     "environmentMap": "environment/studio_small_01.jpg",
     "direction": [-0.3244, -0.8111, -0.4867],
     "color": [1.0, 1.0, 1.0, 1.0],
-    "intensity": 1.6
+    "intensity": 1.42
   },
   "material": {
     "ambient": [0.1, 0.1, 0.1],
