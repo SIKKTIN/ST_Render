@@ -2,6 +2,8 @@
 
 #include "stb_image.h"
 #include "core/math/Vector4.hpp"
+#include <algorithm>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -12,24 +14,51 @@ public:
     Image() : m_width(0), m_height(0), m_channels(0) {}
 
     bool load(const char* path) {
+        return load(path, 0);
+    }
+
+    // Load an image, optionally limiting its largest dimension.  The software
+    // renderer stores decoded pixels as float Colors, so keeping very large
+    // source maps at their original resolution can consume hundreds of MB per
+    // texture.  A zero maxDimension preserves the original behaviour.
+    bool load(const char* path, int maxDimension) {
         m_pixels.clear();
         stbi_set_flip_vertically_on_load(true);
         int w, h, ch;
         unsigned char* data = stbi_load(path, &w, &h, &ch, 3);
         if (!data) return false;
 
-        m_width = w;
-        m_height = h;
+        const int sourceWidth = w;
+        const int sourceHeight = h;
+        const float scale = (maxDimension > 0)
+            ? std::min(1.0f, static_cast<float>(maxDimension) /
+                                  static_cast<float>(std::max(w, h)))
+            : 1.0f;
+        const int targetWidth = std::max(1, static_cast<int>(std::lround(w * scale)));
+        const int targetHeight = std::max(1, static_cast<int>(std::lround(h * scale)));
+
+        m_width = targetWidth;
+        m_height = targetHeight;
         m_channels = ch;
 
-        m_pixels.resize(w * h);
-        for (int y = 0; y < h; y++) {
-            int dst = y * w;
-            int src = (h - 1 - y) * w;
-            for (int x = 0; x < w; x++) {
-                float r = data[(src + x) * 3 + 0] / 255.0f;
-                float g = data[(src + x) * 3 + 1] / 255.0f;
-                float b = data[(src + x) * 3 + 2] / 255.0f;
+        m_pixels.resize(targetWidth * targetHeight);
+        for (int y = 0; y < targetHeight; y++) {
+            // Flip vertically while sampling the source image.  Nearest
+            // sampling keeps this load path inexpensive; bilinear filtering
+            // is still applied by the renderer at draw time.
+            const int sourceY = std::min(sourceHeight - 1,
+                static_cast<int>((static_cast<float>(y) + 0.5f) * sourceHeight /
+                                 targetHeight));
+            const int src = (sourceHeight - 1 - sourceY) * sourceWidth;
+            const int dst = y * targetWidth;
+            for (int x = 0; x < targetWidth; x++) {
+                const int sourceX = std::min(sourceWidth - 1,
+                    static_cast<int>((static_cast<float>(x) + 0.5f) * sourceWidth /
+                                     targetWidth));
+                const int pixel = (src + sourceX) * 3;
+                float r = data[pixel + 0] / 255.0f;
+                float g = data[pixel + 1] / 255.0f;
+                float b = data[pixel + 2] / 255.0f;
                 m_pixels[dst + x] = Color(r, g, b, 1.0f);
             }
         }

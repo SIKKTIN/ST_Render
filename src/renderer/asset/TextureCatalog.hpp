@@ -6,6 +6,11 @@
 
 namespace ST {
 
+struct TextureRoot {
+    std::string directory;
+    std::string prefix;
+};
+
 struct TextureEntry {
     std::string displayName;
     std::string relativePath;
@@ -16,6 +21,7 @@ struct TextureEntry {
 class TextureCatalog {
 public:
     bool scan(const std::string& rootDirectory, std::string& error);
+    bool scan(const std::vector<TextureRoot>& roots, std::string& error);
     const std::vector<TextureEntry>& getEntries() const { return m_entries; }
     int findByRelativePath(const std::string& path) const;
 

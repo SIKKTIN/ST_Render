@@ -102,7 +102,7 @@ def _active_runtime(max_age_seconds: float = 3.0) -> tuple[Path, dict[str, Any]]
     return runtime, state
 
 
-def _send_app_command(command: str, params: dict[str, Any] | None = None, timeout: float = 8.0) -> dict[str, Any]:
+def _send_app_command(command: str, params: dict[str, Any] | None = None, timeout: float = 30.0) -> dict[str, Any]:
     runtime, _ = _active_runtime()
     requests_dir = runtime / "requests"
     responses_dir = runtime / "responses"

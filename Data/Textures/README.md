@@ -21,11 +21,13 @@ Source: https://polyhaven.com/a/studio_small_01
 
 ## Vault door PBR test
 
-`rough_pine_door/` is the 1K JPG PBR set from Poly Haven's **Rough Pine Door**
-asset. It is used by `Data/ScenePrefab/vault_door_pbr.scene.json` for the
-downloaded vault-door test model. The scene uses the diffuse, roughness, and
-DirectX normal maps; metallic is intentionally left at zero because the test
-material represents painted wood.
+`Data/ScenePrefab/vault_door_pbr.scene.json` uses the existing 1K **Metal Plate
+02** PBR set for the circular vault-door model. This matches the model's metal
+construction and avoids stretching a wood texture around a round door.
+
+`rough_pine_door/` is also included as an optional 1K JPG PBR set for testing a
+painted-wood material on models with rectangular door UVs. It is not the
+default vault-door material.
 
 Poly Haven publishes this asset under the CC0 license:
 

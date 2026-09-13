@@ -13,7 +13,13 @@ struct ModelMaterial {
     Color diffuse = Color::white();
     Color specular = Color(0.5f, 0.5f, 0.5f);
     float shininess = 32.0f;
+    float metallicFactor = 0.0f;
+    float roughnessFactor = 0.5f;
+    float normalStrength = 1.0f;
     std::string diffuseTexturePath;
+    std::string roughnessTexturePath;
+    std::string metallicTexturePath;
+    std::string normalTexturePath;
 };
 
 struct ModelPart {

@@ -2,31 +2,31 @@
   "version": 2,
   "sceneName": "vault_door_pbr",
   "camera": {
-    "eye": [1.8, 1.2, 3.8],
-    "yaw": 0.0,
-    "pitch": 0.12,
+    "eye": [1.5, 0.8, 3.2],
+    "yaw": 0.43,
+    "pitch": 0.23,
     "moveSpeed": 2.5
   },
   "lighting": {
     "enabled": true,
-    "ambient": [0.12, 0.12, 0.12],
+    "ambient": [0.18, 0.18, 0.18],
     "environmentColor": [0.16, 0.2, 0.28],
-    "environmentIntensity": 0.35,
+    "environmentIntensity": 0.5,
     "toneMapping": true,
-    "exposure": 1.0,
+    "exposure": 1.3,
     "environmentMap": "environment/studio_small_01.jpg",
     "direction": [-0.3244, -0.8111, -0.4867],
     "color": [1.0, 1.0, 1.0, 1.0],
-    "intensity": 1.4
+    "intensity": 1.7
   },
   "material": {
     "ambient": [0.1, 0.1, 0.1],
-    "diffuse": [0.8, 0.8, 0.8],
+    "diffuse": [0.36, 0.38, 0.42],
     "specular": [0.5, 0.5, 0.5],
     "shininess": 32.0,
-    "metallic": 0.0,
-    "roughness": 0.58,
-    "normalStrength": 0.75,
+    "metallic": 0.85,
+    "roughness": 0.42,
+    "normalStrength": 0.7,
     "emission": [0.0, 0.0, 0.0]
   },
   "shader": "",
@@ -34,24 +34,24 @@
   "objects": [
     {
       "id": 1,
-      "name": "Vault Door (Rough Pine PBR)",
+      "name": "Vault Door (Metal PBR)",
       "model": "vault_door/vault_door.obj",
-      "diffuseTexture": "rough_pine_door/rough_pine_door_diff_1k.jpg",
-      "roughnessTexture": "rough_pine_door/rough_pine_door_rough_1k.jpg",
-      "metallicTexture": "",
-      "normalTexture": "rough_pine_door/rough_pine_door_nor_dx_1k.jpg",
+      "diffuseTexture": "metal_plate_02/metal_plate_02_diff_1k.png",
+      "roughnessTexture": "metal_plate_02/metal_plate_02_rough_1k.png",
+      "metallicTexture": "metal_plate_02/metal_plate_02_metal_1k.png",
+      "normalTexture": "metal_plate_02/metal_plate_02_nor_dx_1k.png",
       "visible": true,
       "position": [0.0, 0.0, -1.92],
       "rotation": [0.0, 90.0, 0.0],
       "scale": [1.0, 1.0, 1.0],
       "material": {
         "ambient": [0.1, 0.1, 0.1],
-        "diffuse": [0.8, 0.8, 0.8],
+        "diffuse": [0.36, 0.38, 0.42],
         "specular": [0.5, 0.5, 0.5],
         "shininess": 32.0,
-        "metallic": 0.0,
-        "roughness": 0.58,
-        "normalStrength": 0.75,
+        "metallic": 0.85,
+        "roughness": 0.42,
+        "normalStrength": 0.7,
         "emission": [0.0, 0.0, 0.0]
       }
     }

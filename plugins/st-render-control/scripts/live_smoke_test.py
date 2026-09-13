@@ -60,6 +60,10 @@ try:
     model_entries = models["structuredContent"]["models"]
     assert model_entries, models
     assert any(entry["path"] == "vault_door/vault_door.obj" for entry in model_entries), models
+    m1911_entry = next(
+        entry for entry in model_entries
+        if entry["path"] == "M1911/source/NonRigged_M1911.fbx"
+    )
 
     textures = request("tools/call", {"name": "list_textures", "arguments": {}})
     texture_entries = textures["structuredContent"]["textures"]
@@ -67,6 +71,10 @@ try:
     assert any(entry["path"] == "rough_pine_door/rough_pine_door_diff_1k.jpg" for entry in texture_entries), textures
     assert any(entry["path"] == "rough_pine_door/rough_pine_door_rough_1k.jpg" for entry in texture_entries), textures
     assert any(entry["path"] == "rough_pine_door/rough_pine_door_nor_dx_1k.jpg" for entry in texture_entries), textures
+    assert any(
+        entry["path"].endswith("M1911_low_Frame_BaseColor.png")
+        for entry in texture_entries
+    ), textures
     normal_entry = next(entry for entry in texture_entries if entry["path"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png")
     selected_texture = request("tools/call", {
         "name": "select_texture",
@@ -87,26 +95,65 @@ try:
     assert selected_maps["metallic"].endswith("metal_plate_02_metal_1k.png"), selected_maps
     assert selected_maps["normal"].endswith("metal_plate_02_nor_dx_1k.png"), selected_maps
 
+    door_model = next(entry for entry in model_entries if entry["path"] == "vault_door/vault_door.obj")
+    replaced = request("tools/call", {
+        "name": "select_model",
+        "arguments": {"index": door_model["index"]},
+    })
+    assert not replaced.get("isError"), replaced
+    replaced_scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
+    assert replaced_scene["structuredContent"]["objects"][0]["modelPath"] == "vault_door/vault_door.obj", replaced_scene
+    assert replaced_scene["structuredContent"]["objects"][0]["name"] == "vault_door.obj 1", replaced_scene
+
     loaded_door = request("tools/call", {
         "name": "load_scene",
         "arguments": {"path": "Data/ScenePrefab/vault_door_pbr.scene.json"},
     })
+    assert not loaded_door.get("isError"), loaded_door
     assert loaded_door["structuredContent"]["objectCount"] == 1, loaded_door
     door_scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
     door_object = door_scene["structuredContent"]["objects"][0]
     assert door_object["modelPath"] == "vault_door/vault_door.obj", door_scene
     door_maps = request("tools/call", {"name": "list_textures", "arguments": {}})
     door_selected_maps = door_maps["structuredContent"]["selectedTextures"]
-    assert door_selected_maps["diffuse"].endswith("rough_pine_door_diff_1k.jpg"), door_maps
-    assert door_selected_maps["roughness"].endswith("rough_pine_door_rough_1k.jpg"), door_maps
-    assert door_selected_maps["normal"].endswith("rough_pine_door_nor_dx_1k.jpg"), door_maps
+    assert door_scene["structuredContent"]["objects"][0]["name"] == "Vault Door (Metal PBR)", door_scene
+    assert door_selected_maps["diffuse"].endswith("metal_plate_02_diff_1k.png"), door_maps
+    assert door_selected_maps["roughness"].endswith("metal_plate_02_rough_1k.png"), door_maps
+    assert door_selected_maps["metallic"].endswith("metal_plate_02_metal_1k.png"), door_maps
+    assert door_selected_maps["normal"].endswith("metal_plate_02_nor_dx_1k.png"), door_maps
+
+    selected_m1911 = request("tools/call", {
+        "name": "select_model",
+        "arguments": {"index": m1911_entry["index"]},
+    })
+    assert not selected_m1911.get("isError"), selected_m1911
+    assert selected_m1911["structuredContent"]["partCount"] > 0, selected_m1911
+    assert selected_m1911["structuredContent"]["materialCount"] > 0, selected_m1911
+    assert "PBR parts:" in selected_m1911["structuredContent"]["textureStatus"], selected_m1911
+
+    loaded_m1911 = request("tools/call", {
+        "name": "load_scene",
+        "arguments": {"path": "Data/ScenePrefab/m1911_pbr.scene.json"},
+    })
+    assert not loaded_m1911.get("isError"), loaded_m1911
+    assert loaded_m1911["structuredContent"]["objectCount"] == 1, loaded_m1911
+    m1911_scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
+    assert m1911_scene["structuredContent"]["objects"][0]["modelPath"] == "M1911/source/NonRigged_M1911.fbx", m1911_scene
+    assert m1911_scene["structuredContent"]["objects"][0]["name"] == "M1911 (PBR)", m1911_scene
+    m1911_status = request("tools/call", {"name": "list_models", "arguments": {}})
+    assert "PBR parts:" in m1911_status["structuredContent"]["textureStatus"], m1911_status
+    m1911_capture = request("tools/call", {"name": "capture_canvas", "arguments": {}})
+    assert any(item.get("type") == "image" for item in m1911_capture["content"]), m1911_capture
 
     scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
     assert len(scene["structuredContent"]["objects"]) == 1, scene
 
+    # Use a lightweight OBJ for scene-editing CRUD checks; the FBX path above
+    # already exercises the heavier multi-part import and PBR render path.
+    fixture_model = next(entry for entry in model_entries if entry["format"] == "obj")
     added = request("tools/call", {
         "name": "add_scene_object",
-        "arguments": {"modelIndex": model_entries[min(1, len(model_entries) - 1)]["index"]},
+        "arguments": {"modelIndex": fixture_model["index"]},
     })
     assert len(added["structuredContent"]["objects"]) == 2, added
     moved = request("tools/call", {

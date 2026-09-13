@@ -21,6 +21,7 @@ find_package(imgui CONFIG REQUIRED)
 
 # nlohmann/json 依赖
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(assimp CONFIG REQUIRED)
 
 # 输出目录设置
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

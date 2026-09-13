@@ -93,4 +93,12 @@ if(WIN32)
         COMMENT "Copying texture assets"
         VERBATIM
     )
+
+    add_custom_command(TARGET ST_Render_Manager POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/Data/M1911"
+            $<TARGET_FILE_DIR:ST_Render_Manager>/Data/M1911
+        COMMENT "Copying M1911 FBX and PBR assets"
+        VERBATIM
+    )
 endif()

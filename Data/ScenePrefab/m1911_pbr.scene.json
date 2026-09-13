@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "sceneName": "m1911_pbr",
+  "camera": {
+    "eye": [1.6, 1.0, 2.5],
+    "yaw": 0.6,
+    "pitch": 0.35,
+    "moveSpeed": 2.5
+  },
+  "lighting": {
+    "enabled": true,
+    "ambient": [0.16, 0.16, 0.16],
+    "environmentColor": [0.16, 0.2, 0.28],
+    "environmentIntensity": 0.45,
+    "toneMapping": true,
+    "exposure": 1.15,
+    "environmentMap": "environment/studio_small_01.jpg",
+    "direction": [-0.3244, -0.8111, -0.4867],
+    "color": [1.0, 1.0, 1.0, 1.0],
+    "intensity": 1.6
+  },
+  "material": {
+    "ambient": [0.1, 0.1, 0.1],
+    "diffuse": [0.8, 0.8, 0.8],
+    "specular": [0.5, 0.5, 0.5],
+    "shininess": 32.0,
+    "metallic": 0.0,
+    "roughness": 0.5,
+    "normalStrength": 1.0,
+    "emission": [0.0, 0.0, 0.0]
+  },
+  "shader": "",
+  "selectedObject": 0,
+  "objects": [
+    {
+      "id": 1,
+      "name": "M1911 (PBR)",
+      "model": "M1911/source/NonRigged_M1911.fbx",
+      "diffuseTexture": "",
+      "roughnessTexture": "",
+      "metallicTexture": "",
+      "normalTexture": "",
+      "visible": true,
+      "position": [0.0, 0.0, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [1.0, 1.0, 1.0],
+      "material": {
+        "ambient": [0.1, 0.1, 0.1],
+        "diffuse": [0.8, 0.8, 0.8],
+        "specular": [0.5, 0.5, 0.5],
+        "shininess": 32.0,
+        "metallic": 0.0,
+        "roughness": 0.5,
+        "normalStrength": 1.0,
+        "emission": [0.0, 0.0, 0.0]
+      }
+    }
+  ]
+}

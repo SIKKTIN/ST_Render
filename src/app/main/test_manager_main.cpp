@@ -573,6 +573,7 @@ int main(int argc, char* argv[]) {
                     { "index", static_cast<int>(i) },
                     { "name", entries[i].displayName },
                     { "path", entries[i].relativePath },
+                    { "format", entries[i].format },
                     { "selected", static_cast<int>(i) == render3D->getSelectedModelIndex() }
                 });
             }

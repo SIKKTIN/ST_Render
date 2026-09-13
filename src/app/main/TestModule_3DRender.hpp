@@ -12,7 +12,7 @@
 #include "renderer/asset/ModelAsset.hpp"
 #include "renderer/asset/ModelCatalog.hpp"
 #include "renderer/asset/TextureCatalog.hpp"
-#include "renderer/asset/ObjModelLoader.hpp"
+#include "renderer/asset/ModelLoader.hpp"
 #include "core/texture/ST_Image.hpp"
 #include "renderer/geometry/Vertex.hpp"
 #include "renderer/geometry/Mesh.hpp"
@@ -110,6 +110,8 @@ public:
     void onKeyDown(int keycode) override;
 
 private:
+    struct SceneObject;
+
     void rebuildBuffers(int canvasW, int canvasH);
     void drawMesh(const ST::Mesh& mesh,
                   const ST::Matrix4x4& model,
@@ -122,6 +124,7 @@ private:
     void scanModelCatalog();
     void scanTextureCatalog();
     bool loadSelectedModel();
+    void buildPartMaterials(SceneObject& object);
     bool renderModelControls();
     bool renderSceneObjectControls();
     bool createSceneObject(int modelIndex);
@@ -134,6 +137,7 @@ private:
     void selectSceneObject(int objectIndex);
     ST::Matrix4x4 buildSceneObjectMatrix(int objectIndex) const;
     void bindSceneObjectMaterial(int objectIndex);
+    void bindScenePartMaterial(int objectIndex, int partIndex);
     void drawLightGizmo(SDL_Renderer* renderer,
                         int canvasW, int canvasH,
                         const ST::Matrix4x4& view,
@@ -211,6 +215,19 @@ private:
     bool m_transformGizmoValid = false;
 
     struct SceneObject {
+        struct PartMaterial {
+            ST::Material material = ST::Material::defaultMaterial();
+            ST::Image diffuseTexture;
+            ST::Image roughnessTexture;
+            ST::Image metallicTexture;
+            ST::Image normalTexture;
+            std::string diffuseTexturePath;
+            std::string roughnessTexturePath;
+            std::string metallicTexturePath;
+            std::string normalTexturePath;
+            bool bound = false;
+        };
+
         int id = 0;
         std::string name;
         int modelIndex = -1;
@@ -224,6 +241,7 @@ private:
         std::string metallicTexturePath;
         ST::Image normalTexture;
         std::string normalTexturePath;
+        std::vector<PartMaterial> partMaterials;
         ST::Material material = ST::Material::defaultMaterial();
         std::string textureStatus;
         ST::Vector3 position = ST::Vector3::zero();

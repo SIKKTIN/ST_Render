@@ -132,6 +132,15 @@ public:
         Vector2 s1 = toScreenSpace(v1);
         Vector2 s2 = toScreenSpace(v2);
 
+        // Clipping can produce a vertex exactly on the homogeneous camera
+        // plane (w == 0). Reject non-finite screen coordinates before the
+        // perspective divide can turn them into an unbounded raster box.
+        if (!std::isfinite(s0.x) || !std::isfinite(s0.y) ||
+            !std::isfinite(s1.x) || !std::isfinite(s1.y) ||
+            !std::isfinite(s2.x) || !std::isfinite(s2.y)) {
+            return;
+        }
+
         const float area = (s1.x - s0.x) * (s2.y - s0.y)
                          - (s1.y - s0.y) * (s2.x - s0.x);
         if (!std::isfinite(area) || std::fabs(area) <= EPSILON) return;
@@ -140,6 +149,7 @@ public:
         int maxX = static_cast<int>(std::min((float)m_width - 1, std::max({ s0.x, s1.x, s2.x })));
         int minY = static_cast<int>(std::max(0.0f, std::min({ s0.y, s1.y, s2.y })));
         int maxY = static_cast<int>(std::min((float)m_height - 1, std::max({ s0.y, s1.y, s2.y })));
+        if (minX > maxX || minY > maxY) return;
 
         float w0 = v0.position.w;
         float w1 = v1.position.w;

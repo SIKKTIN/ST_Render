@@ -167,9 +167,17 @@ void TestModule_3DRender::scanModelCatalog() {
             : std::string();
 
     std::string error;
-    if (!m_modelCatalog.scan(m_modelRoot, error)) {
+    const std::vector<ST::ModelRoot> roots = {
+        {m_modelRoot, {}},
+        {"Data/M1911/source", "M1911/source"}
+    };
+    if (!m_modelCatalog.scan(roots, error)) {
         const std::string fallback = "../../Data/Models";
-        if (!m_modelCatalog.scan(fallback, error)) {
+        const std::vector<ST::ModelRoot> fallbackRoots = {
+            {fallback, {}},
+            {"../../Data/M1911/source", "M1911/source"}
+        };
+        if (!m_modelCatalog.scan(fallbackRoots, error)) {
             m_selectedModelIndex = -1;
             m_addModelIndex = -1;
             m_modelLoaded = false;
@@ -181,7 +189,25 @@ void TestModule_3DRender::scanModelCatalog() {
 
     m_addModelIndex = m_modelCatalog.findByRelativePath(previousPath);
     if (m_addModelIndex < 0 && !m_modelCatalog.getEntries().empty()) {
-        m_addModelIndex = 0;
+        // Keep the historical sphere fixture as the default startup model.
+        // Newly discovered FBX assets must be opt-in so adding a large asset
+        // directory cannot make the editor import it during construction.
+        for (int i = 0; i < static_cast<int>(m_modelCatalog.getEntries().size()); ++i) {
+            const auto& entry = m_modelCatalog.getEntries()[i];
+            if (entry.format == "obj" && entry.displayName == "sphere.obj") {
+                m_addModelIndex = i;
+                break;
+            }
+        }
+        if (m_addModelIndex < 0) {
+            for (int i = 0; i < static_cast<int>(m_modelCatalog.getEntries().size()); ++i) {
+                if (m_modelCatalog.getEntries()[i].format == "obj") {
+                    m_addModelIndex = i;
+                    break;
+                }
+            }
+        }
+        if (m_addModelIndex < 0) m_addModelIndex = 0;
     }
 
     // A refresh may reorder catalog entries. Scene objects retain their
@@ -199,12 +225,18 @@ void TestModule_3DRender::scanModelCatalog() {
 
 void TestModule_3DRender::scanTextureCatalog() {
     std::string error;
-    if (m_textureCatalog.scan(m_textureRoot, error)) return;
+    const std::vector<ST::TextureRoot> roots = {
+        {m_textureRoot, {}},
+        {"Data/M1911/pbr_textures", "M1911/pbr_textures"}
+    };
+    if (m_textureCatalog.scan(roots, error)) return;
 
     const std::string fallback = "../../Data/Textures";
-    if (m_textureCatalog.scan(fallback, error)) {
-        m_textureRoot = fallback;
-    }
+    const std::vector<ST::TextureRoot> fallbackRoots = {
+        {fallback, {}},
+        {"../../Data/M1911/pbr_textures", "M1911/pbr_textures"}
+    };
+    if (m_textureCatalog.scan(fallbackRoots, error)) m_textureRoot = fallback;
 }
 
 bool TestModule_3DRender::loadDiffuseTextureForObject(int objectIndex, int textureIndex) {
@@ -334,7 +366,7 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
 
     ST::ModelAsset loaded;
     std::string error;
-    if (!ST::ObjModelLoader::load(entries[modelIndex].absolutePath, loaded, error)) {
+    if (!ST::ModelLoader::load(entries[modelIndex].absolutePath, loaded, error)) {
         m_modelError = error;
         return false;
     }
@@ -343,10 +375,11 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
     // allocator address reuse cannot make a stale vertex cache look valid.
     m_vertexTransformCaches.clear();
     SceneObject& object = m_sceneObjects[objectIndex];
+    const bool modelChanged = object.modelPath != entries[modelIndex].relativePath;
     object.modelIndex = modelIndex;
     object.modelPath = entries[modelIndex].relativePath;
     object.model = std::make_shared<ST::ModelAsset>(std::move(loaded));
-    if (object.name.empty()) {
+    if (object.name.empty() || modelChanged) {
         object.name = entries[modelIndex].displayName + " " + std::to_string(object.id);
     }
     object.material = ST::Material::defaultMaterial();
@@ -389,10 +422,126 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
             object.textureStatus = "No MTL material; using default white material";
         }
     }
+    if (entries[modelIndex].format == "fbx") {
+        try {
+            buildPartMaterials(object);
+        } catch (const std::exception& exception) {
+            object.partMaterials.clear();
+            object.textureStatus = std::string("PBR import failed: ") + exception.what();
+            m_modelError = object.textureStatus;
+        }
+    } else {
+        object.partMaterials.clear();
+    }
+    // Imported assets can use very different unit scales. Reframe the camera
+    // from the actual model bounds so a newly selected FBX is neither clipped
+    // by the near plane nor rendered as a tiny or screen-filling object.
+    if (m_selectedSceneObject == objectIndex || entries[modelIndex].format == "fbx") {
+        m_selectedSceneObject = objectIndex;
+        focusSelectedSceneObject();
+    }
     selectSceneObject(objectIndex);
     markSceneDirty();
     needsRerender = true;
     return true;
+}
+
+void TestModule_3DRender::buildPartMaterials(SceneObject& object) {
+    object.partMaterials.clear();
+    if (!object.model || object.model->parts.empty()) return;
+
+    object.partMaterials.resize(object.model->parts.size());
+    int boundParts = 0;
+    std::vector<std::string> missing;
+    std::vector<std::string> names;
+
+    for (size_t partIndex = 0; partIndex < object.model->parts.size(); ++partIndex) {
+        const ST::ModelPart& part = object.model->parts[partIndex];
+        if (part.materialIndex < 0 ||
+            part.materialIndex >= static_cast<int>(object.model->materials.size())) {
+            continue;
+        }
+
+        const ST::ModelMaterial& source = object.model->materials[part.materialIndex];
+        SceneObject::PartMaterial& target = object.partMaterials[partIndex];
+        target.material.ambient = source.ambient.rgb;
+        target.material.diffuse = source.diffuse.rgb;
+        target.material.specular = source.specular.rgb;
+        target.material.shininess = std::max(1.0f, source.shininess);
+        // A texture represents the channel value for the imported part. Use
+        // a neutral factor of one when a map is present; otherwise the
+        // ModelMaterial scalar remains the fallback for legacy assets.
+        target.material.metallicFactor = source.metallicTexturePath.empty()
+            ? std::clamp(source.metallicFactor, 0.0f, 1.0f) : 1.0f;
+        target.material.roughness = source.roughnessTexturePath.empty()
+            ? std::clamp(source.roughnessFactor, 0.02f, 1.0f) : 1.0f;
+        target.material.normalStrength = std::clamp(source.normalStrength, 0.0f, 2.0f);
+
+        const auto loadTexture = [&](const std::string& path,
+                                     ST::Image& image,
+                                     std::string& storedPath,
+                                     const char* label) {
+            if (path.empty()) return false;
+            const int textureIndex = m_textureCatalog.findByRelativePath(path);
+            const std::string resolvedPath = textureIndex >= 0
+                ? m_textureCatalog.getEntries()[textureIndex].absolutePath
+                : path;
+            // M1911 source maps are 2048x2048. ST_Image stores decoded
+            // pixels as float Colors, so cap imported FBX maps at 512 to keep
+            // all four maps per part within a predictable software-renderer
+            // memory budget while retaining enough detail for the viewport.
+            if (!image.load(resolvedPath.c_str(), 512)) {
+                missing.push_back(part.name + " " + label + ": " + path);
+                return false;
+            }
+            storedPath = textureIndex >= 0
+                ? m_textureCatalog.getEntries()[textureIndex].relativePath
+                : path;
+            return true;
+        };
+
+        const bool hasDiffuse = loadTexture(source.diffuseTexturePath,
+                                            target.diffuseTexture,
+                                            target.diffuseTexturePath,
+                                            "Base Color");
+        const bool hasRoughness = loadTexture(source.roughnessTexturePath,
+                                              target.roughnessTexture,
+                                              target.roughnessTexturePath,
+                                              "Roughness");
+        const bool hasMetallic = loadTexture(source.metallicTexturePath,
+                                             target.metallicTexture,
+                                             target.metallicTexturePath,
+                                             "Metallic");
+        const bool hasNormal = loadTexture(source.normalTexturePath,
+                                           target.normalTexture,
+                                           target.normalTexturePath,
+                                           "Normal");
+        target.bound = hasDiffuse || hasRoughness || hasMetallic || hasNormal;
+        if (target.bound) {
+            ++boundParts;
+            names.push_back(source.name.empty() ? part.name : source.name);
+        }
+    }
+
+    if (boundParts > 0) {
+        object.textureStatus = "PBR parts: " + std::to_string(boundParts) + "/" +
+                               std::to_string(object.partMaterials.size());
+        if (!names.empty()) {
+            object.textureStatus += " (";
+            for (size_t i = 0; i < names.size(); ++i) {
+                if (i > 0) object.textureStatus += ", ";
+                object.textureStatus += names[i];
+            }
+            object.textureStatus += ")";
+        }
+    }
+    if (!missing.empty()) {
+        object.textureStatus += " | Missing: ";
+        for (size_t i = 0; i < missing.size(); ++i) {
+            if (i > 0) object.textureStatus += "; ";
+            object.textureStatus += missing[i];
+        }
+    }
 }
 
 bool TestModule_3DRender::createSceneObject(int modelIndex) {
@@ -786,6 +935,9 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                 error = m_modelError.empty() ? "unable to load scene model" : m_modelError;
                 return false;
             }
+            const bool isPartMaterialModel =
+                m_modelCatalog.getEntries()[modelIndex].format == "fbx";
+            const std::string importedTextureStatus = m_sceneObjects.back().textureStatus;
             if (savedObject.contains("material")) {
                 const Json& material = savedObject["material"];
                 if (material.contains("ambient")) m_sceneObjects.back().material.ambient = readVector(material["ambient"], "material ambient");
@@ -844,6 +996,12 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                                  m_sceneObjects.back().metallicTexturePath);
             restoreScalarTexture("normalTexture", m_sceneObjects.back().normalTexture,
                                  m_sceneObjects.back().normalTexturePath);
+            // Scene files keep object-level texture slots for OBJ backwards
+            // compatibility. FBX PBR bindings are rebuilt from their material
+            // names and must remain the status shown by the model inspector.
+            if (isPartMaterialModel) {
+                m_sceneObjects.back().textureStatus = importedTextureStatus;
+            }
             maxId = std::max(maxId, m_sceneObjects.back().id);
         }
 
@@ -1000,7 +1158,7 @@ void TestModule_3DRender::focusSelectedSceneObject() {
     const float maxScale = std::max({std::fabs(object.scale.x),
                                      std::fabs(object.scale.y),
                                      std::fabs(object.scale.z)});
-    const float radius = std::max(0.05f, 0.9f * maxScale);
+    const float radius = std::max(0.05f, object.model->boundsRadius * maxScale);
     const float distance = std::max(1.5f, radius * 2.4f);
     const float cp = std::cos(m_pitch);
     const float sp = std::sin(m_pitch);
@@ -1041,6 +1199,47 @@ void TestModule_3DRender::bindSceneObjectMaterial(int objectIndex) {
         m_fragmentShader.setNormalTexture(object.normalTexture.getPixels(),
                                           object.normalTexture.getWidth(),
                                           object.normalTexture.getHeight());
+    } else {
+        m_fragmentShader.setNormalTexture({}, 0, 0);
+    }
+}
+
+void TestModule_3DRender::bindScenePartMaterial(int objectIndex, int partIndex) {
+    if (objectIndex < 0 || objectIndex >= static_cast<int>(m_sceneObjects.size())) return;
+    const SceneObject& object = m_sceneObjects[objectIndex];
+    if (partIndex < 0 || partIndex >= static_cast<int>(object.partMaterials.size()) ||
+        !object.partMaterials[partIndex].bound) {
+        bindSceneObjectMaterial(objectIndex);
+        return;
+    }
+
+    const SceneObject::PartMaterial& part = object.partMaterials[partIndex];
+    m_fragmentShader.setMaterial(part.material);
+    if (part.diffuseTexture.isValid()) {
+        m_fragmentShader.setTexture(part.diffuseTexture.getPixels(),
+                                    part.diffuseTexture.getWidth(),
+                                    part.diffuseTexture.getHeight());
+    } else {
+        m_fragmentShader.setTexture({}, 0, 0);
+    }
+    if (part.roughnessTexture.isValid()) {
+        m_fragmentShader.setRoughnessTexture(part.roughnessTexture.getPixels(),
+                                             part.roughnessTexture.getWidth(),
+                                             part.roughnessTexture.getHeight());
+    } else {
+        m_fragmentShader.setRoughnessTexture({}, 0, 0);
+    }
+    if (part.metallicTexture.isValid()) {
+        m_fragmentShader.setMetallicTexture(part.metallicTexture.getPixels(),
+                                            part.metallicTexture.getWidth(),
+                                            part.metallicTexture.getHeight());
+    } else {
+        m_fragmentShader.setMetallicTexture({}, 0, 0);
+    }
+    if (part.normalTexture.isValid()) {
+        m_fragmentShader.setNormalTexture(part.normalTexture.getPixels(),
+                                          part.normalTexture.getWidth(),
+                                          part.normalTexture.getHeight());
     } else {
         m_fragmentShader.setNormalTexture({}, 0, 0);
     }
@@ -1157,7 +1356,6 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
         float visibilityDot = faceNormal.dot(toEye);
         if (cameraInside) visibilityDot = -visibilityDot;
         if (visibilityDot <= 0.0f) continue;
-
         // ---- Complete clip-space clipping (Sutherland-Hodgman) ----
         // Do not require any original vertex to be inside the frustum: a
         // triangle can intersect the visible volume with all three vertices
@@ -1340,8 +1538,9 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
         const SceneObject& object = m_sceneObjects[objectIndex];
         if (!object.visible || !object.model) continue;
         const ST::Matrix4x4 model = buildSceneObjectMatrix(objectIndex);
-        bindSceneObjectMaterial(objectIndex);
-        for (const auto& part : object.model->parts) {
+        for (size_t partIndex = 0; partIndex < object.model->parts.size(); ++partIndex) {
+            bindScenePartMaterial(objectIndex, static_cast<int>(partIndex));
+            const auto& part = object.model->parts[partIndex];
             drawMesh(part.mesh, model, view, projection);
         }
         if (objectIndex == m_selectedSceneObject) selectedModelMatrix = model;
@@ -1904,7 +2103,7 @@ bool TestModule_3DRender::renderModelControls() {
 
     const auto& entries = m_modelCatalog.getEntries();
     if (entries.empty()) {
-        ImGui::TextDisabled("No .obj files found in %s", m_modelRoot.c_str());
+        ImGui::TextDisabled("No OBJ/FBX model assets found in %s", m_modelRoot.c_str());
     } else {
         const char* preview = (m_selectedModelIndex >= 0 &&
                                m_selectedModelIndex < static_cast<int>(entries.size()))
@@ -1924,7 +2123,9 @@ bool TestModule_3DRender::renderModelControls() {
             ImGui::EndCombo();
         }
         if (m_selectedModelIndex >= 0 && m_selectedModelIndex < static_cast<int>(entries.size())) {
-            ImGui::TextDisabled("%s", entries[m_selectedModelIndex].relativePath.c_str());
+            ImGui::TextDisabled("%s | format: %s",
+                                entries[m_selectedModelIndex].relativePath.c_str(),
+                                entries[m_selectedModelIndex].format.c_str());
         }
     }
 

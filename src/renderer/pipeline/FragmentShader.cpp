@@ -166,9 +166,14 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 	namespace {
 	Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, int height,
 		const Vector2& uv) {
-		if (texture.empty() || width <= 0 || height <= 0) return Color::white();
-		float u = std::fmod(uv.x, 1.0f);
-		float v = std::fmod(uv.y, 1.0f);
+		if (texture.empty() || width <= 0 || height <= 0 ||
+			texture.size() < static_cast<size_t>(width) * static_cast<size_t>(height)) {
+			return Color::white();
+		}
+		const Vector2 safeUv(std::isfinite(uv.x) ? uv.x : 0.0f,
+			std::isfinite(uv.y) ? uv.y : 0.0f);
+		float u = std::fmod(safeUv.x, 1.0f);
+		float v = std::fmod(safeUv.y, 1.0f);
 		if (u < 0.0f) u += 1.0f;
 		if (v < 0.0f) v += 1.0f;
 		const float x = u * static_cast<float>(width) - 0.5f;
@@ -190,9 +195,14 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 
 	Color sampleTextureNearestFrom(const std::vector<Color>& texture, int width, int height,
 		const Vector2& uv) {
-		if (texture.empty() || width <= 0 || height <= 0) return Color::white();
-		float u = std::fmod(uv.x, 1.0f);
-		float v = std::fmod(uv.y, 1.0f);
+		if (texture.empty() || width <= 0 || height <= 0 ||
+			texture.size() < static_cast<size_t>(width) * static_cast<size_t>(height)) {
+			return Color::white();
+		}
+		const Vector2 safeUv(std::isfinite(uv.x) ? uv.x : 0.0f,
+			std::isfinite(uv.y) ? uv.y : 0.0f);
+		float u = std::fmod(safeUv.x, 1.0f);
+		float v = std::fmod(safeUv.y, 1.0f);
 		if (u < 0.0f) u += 1.0f;
 		if (v < 0.0f) v += 1.0f;
 		const int x = std::clamp(static_cast<int>(u * width), 0, width - 1);
@@ -202,9 +212,12 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 
 	float sampleScalarMap(const std::vector<Color>& texture, int width, int height,
 	                     const Vector2& uv, bool enabled) {
-		if (!enabled || texture.empty() || width <= 0 || height <= 0) return 1.0f;
-		float u = std::fmod(uv.x, 1.0f);
-		float v = std::fmod(uv.y, 1.0f);
+		if (!enabled || texture.empty() || width <= 0 || height <= 0 ||
+			texture.size() < static_cast<size_t>(width) * static_cast<size_t>(height)) return 1.0f;
+		const Vector2 safeUv(std::isfinite(uv.x) ? uv.x : 0.0f,
+			std::isfinite(uv.y) ? uv.y : 0.0f);
+		float u = std::fmod(safeUv.x, 1.0f);
+		float v = std::fmod(safeUv.y, 1.0f);
 		if (u < 0.0f) u += 1.0f;
 		if (v < 0.0f) v += 1.0f;
 		const int x = std::clamp(static_cast<int>(u * width), 0, width - 1);
@@ -226,12 +239,16 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 	}
 
 	Color FragmentShader::sampleTextureBilinear(const Vector2& uv) {
-		if (!m_hasTexture) {
+		if (!m_hasTexture || !m_texture || m_textureWidth <= 0 || m_textureHeight <= 0 ||
+			m_texture->size() < static_cast<size_t>(m_textureWidth) *
+			static_cast<size_t>(m_textureHeight)) {
 			return Color::white();
 		}
 
-		float u = std::fmod(uv.x, 1.0f);
-		float v = std::fmod(uv.y, 1.0f);
+		const Vector2 safeUv(std::isfinite(uv.x) ? uv.x : 0.0f,
+			std::isfinite(uv.y) ? uv.y : 0.0f);
+		float u = std::fmod(safeUv.x, 1.0f);
+		float v = std::fmod(safeUv.y, 1.0f);
 		if (u < 0) u += 1.0f;
 		if (v < 0) v += 1.0f;
 
@@ -256,10 +273,12 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 	}
 
 	Color FragmentShader::sampleTextureClamp(const Vector2& uv) {
-		if (!m_hasTexture) return Color::white();
+		if (!m_hasTexture || !m_texture || m_textureWidth <= 0 || m_textureHeight <= 0 ||
+			m_texture->size() < static_cast<size_t>(m_textureWidth) *
+			static_cast<size_t>(m_textureHeight)) return Color::white();
 
-		float u = clamp(uv.x, 0.0f, 1.0f);
-		float v = clamp(uv.y, 0.0f, 1.0f);
+		float u = clamp(std::isfinite(uv.x) ? uv.x : 0.0f, 0.0f, 1.0f);
+		float v = clamp(std::isfinite(uv.y) ? uv.y : 0.0f, 0.0f, 1.0f);
 
 		int x = static_cast<int>(u * (m_textureWidth - 1));
 		int y = static_cast<int>(v * (m_textureHeight - 1));

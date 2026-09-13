@@ -19,37 +19,47 @@ bool isTextureExtension(const std::string& extension) {
 }
 
 bool TextureCatalog::scan(const std::string& rootDirectory, std::string& error) {
+    return scan(std::vector<TextureRoot>{{rootDirectory, {}}}, error);
+}
+
+bool TextureCatalog::scan(const std::vector<TextureRoot>& roots, std::string& error) {
     namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path root = fs::absolute(fs::path(rootDirectory), ec);
-    if (ec || !fs::exists(root, ec) || !fs::is_directory(root, ec)) {
-        error = "texture directory not found: " + rootDirectory;
-        m_entries.clear();
-        return false;
+    std::vector<TextureEntry> entries;
+    bool foundRoot = false;
+    for (const TextureRoot& textureRoot : roots) {
+        std::error_code ec;
+        const fs::path root = fs::absolute(fs::path(textureRoot.directory), ec);
+        if (ec || !fs::exists(root, ec) || !fs::is_directory(root, ec)) continue;
+        foundRoot = true;
+
+        fs::recursive_directory_iterator iterator(
+            root, fs::directory_options::skip_permission_denied, ec);
+        fs::recursive_directory_iterator end;
+        while (iterator != end) {
+            if (ec) {
+                ec.clear();
+                iterator.increment(ec);
+                continue;
+            }
+            const fs::directory_entry& file = *iterator;
+            if (file.is_regular_file(ec) && isTextureExtension(lowerExtension(file.path()))) {
+                fs::path relative = fs::relative(file.path(), root, ec);
+                if (!ec) {
+                    TextureEntry entry;
+                    entry.displayName = file.path().filename().string();
+                    entry.relativePath = (fs::path(textureRoot.prefix) / relative).generic_string();
+                    entry.absolutePath = fs::absolute(file.path()).string();
+                    entries.push_back(std::move(entry));
+                }
+            }
+            iterator.increment(ec);
+        }
     }
 
-    std::vector<TextureEntry> entries;
-    fs::recursive_directory_iterator iterator(
-        root, fs::directory_options::skip_permission_denied, ec);
-    fs::recursive_directory_iterator end;
-    while (iterator != end) {
-        if (ec) {
-            ec.clear();
-            iterator.increment(ec);
-            continue;
-        }
-        const fs::directory_entry& file = *iterator;
-        if (file.is_regular_file(ec) && isTextureExtension(lowerExtension(file.path()))) {
-            fs::path relative = fs::relative(file.path(), root, ec);
-            if (!ec) {
-                TextureEntry entry;
-                entry.displayName = file.path().filename().string();
-                entry.relativePath = relative.generic_string();
-                entry.absolutePath = fs::absolute(file.path()).string();
-                entries.push_back(std::move(entry));
-            }
-        }
-        iterator.increment(ec);
+    if (!foundRoot) {
+        error = "no texture directories found";
+        m_entries.clear();
+        return false;
     }
 
     std::sort(entries.begin(), entries.end(), [](const TextureEntry& a, const TextureEntry& b) {
