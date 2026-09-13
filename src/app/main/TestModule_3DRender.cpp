@@ -1158,7 +1158,13 @@ void TestModule_3DRender::focusSelectedSceneObject() {
     const float maxScale = std::max({std::fabs(object.scale.x),
                                      std::fabs(object.scale.y),
                                      std::fabs(object.scale.z)});
-    const float radius = std::max(0.05f, object.model->boundsRadius * maxScale);
+    // Repository models use mixed authoring units (the M1911 FBX is authored
+    // in centimetres while the editor camera uses scene units). Keep the
+    // focus distance bounded so a large source-space bounds sphere does not
+    // make the visible mesh collapse to a few pixels; users can still zoom
+    // farther with the wheel or fly controls.
+    const float radius = std::clamp(object.model->boundsRadius * maxScale,
+                                    0.05f, 1.0f);
     const float distance = std::max(1.5f, radius * 2.4f);
     const float cp = std::cos(m_pitch);
     const float sp = std::sin(m_pitch);
@@ -1457,8 +1463,10 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // rasterizer. Keep the explicit supersampling option, but adapt it to 1x
     // while the environment map is active so the viewport remains usable.
     const bool heavyPbr = m_environmentMapEnabled && m_environmentTexture.isValid();
-    const bool previewQuality = m_renderQuality == 1 ||
-                                (m_renderQuality == 0 && m_adaptivePreview);
+    // Adaptive mode controls raster resolution, but must not disable the
+    // environment lookup on a settled frame: doing so makes metallic FBX
+    // parts look like an unlit grey material after a slow first frame.
+    const bool previewQuality = m_renderQuality == 1;
     const bool finalQuality = m_renderQuality == 2;
     const bool reducedQuality = previewQuality || (m_interactionActive && !finalQuality);
     const bool interactionPreview = m_interactionActive && !finalQuality;
@@ -1689,12 +1697,36 @@ bool TestModule_3DRender::renderControls() {
     }
 
     if (ImGui::CollapsingHeader("Material Inspector", defaultOpen)) {
-        changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
-        changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
-        changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
-        changed |= ImGui::SliderFloat("Normal strength", &editedMaterial->normalStrength, 0.0f, 2.0f);
-        changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
-        if (m_selectedSceneObject >= 0 &&
+        const SceneObject* selectedObjectForInspector =
+            (m_selectedSceneObject >= 0 &&
+             m_selectedSceneObject < static_cast<int>(m_sceneObjects.size()))
+                ? &m_sceneObjects[m_selectedSceneObject] : nullptr;
+        const bool hasImportedPartMaterials = selectedObjectForInspector &&
+            !selectedObjectForInspector->partMaterials.empty();
+        if (hasImportedPartMaterials) {
+            ImGui::TextDisabled("FBX PBR materials are bound per mesh part");
+            ImGui::TextWrapped("%s", selectedObjectForInspector->textureStatus.c_str());
+            for (size_t partIndex = 0;
+                 partIndex < selectedObjectForInspector->partMaterials.size(); ++partIndex) {
+                const auto& part = selectedObjectForInspector->partMaterials[partIndex];
+                const auto& meshPart = selectedObjectForInspector->model->parts[partIndex];
+                const std::string& label = meshPart.materialName.empty()
+                    ? meshPart.name : meshPart.materialName;
+                int mapCount = 0;
+                mapCount += part.diffuseTexture.isValid() ? 1 : 0;
+                mapCount += part.roughnessTexture.isValid() ? 1 : 0;
+                mapCount += part.metallicTexture.isValid() ? 1 : 0;
+                mapCount += part.normalTexture.isValid() ? 1 : 0;
+                ImGui::BulletText("%s: %d/4 PBR maps", label.c_str(), mapCount);
+            }
+        } else {
+            changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
+            changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
+            changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
+            changed |= ImGui::SliderFloat("Normal strength", &editedMaterial->normalStrength, 0.0f, 2.0f);
+            changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
+        }
+        if (!hasImportedPartMaterials && m_selectedSceneObject >= 0 &&
             m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
             SceneObject& selectedObject = m_sceneObjects[m_selectedSceneObject];
             const int selectedTexture = m_textureCatalog.findByRelativePath(selectedObject.diffuseTexturePath);
@@ -1776,6 +1808,10 @@ bool TestModule_3DRender::renderControls() {
                 scanTextureCatalog();
                 changed = true;
             }
+        }
+        if (hasImportedPartMaterials && ImGui::Button("Refresh texture list")) {
+            scanTextureCatalog();
+            changed = true;
         }
     }
 

@@ -145,6 +145,13 @@ try:
     m1911_capture = request("tools/call", {"name": "capture_canvas", "arguments": {}})
     assert any(item.get("type") == "image" for item in m1911_capture["content"]), m1911_capture
 
+    # Switch back to the lightweight fixture before CRUD checks so those
+    # requests validate scene editing rather than waiting on repeated full
+    # resolution M1911 environment-map renders.
+    request("tools/call", {
+        "name": "load_scene",
+        "arguments": {"path": "Data/ScenePrefab/vault_door_pbr.scene.json"},
+    })
     scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
     assert len(scene["structuredContent"]["objects"]) == 1, scene
 
