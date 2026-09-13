@@ -54,6 +54,9 @@ TestModule_3DRender::TestModule_3DRender()
     scanShaderCatalog();
     if (m_selectedShaderIndex >= 0) loadSelectedShader();
     scanModelCatalog();
+    // The generated default scene is a clean starting point; only user
+    // edits should add the unsaved marker.
+    m_sceneDirty = false;
 }
 
 TestModule_3DRender::~TestModule_3DRender() {
@@ -252,6 +255,7 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
         }
     }
     selectSceneObject(objectIndex);
+    markSceneDirty();
     needsRerender = true;
     return true;
 }
@@ -307,6 +311,7 @@ void TestModule_3DRender::duplicateSelectedSceneObject() {
     copy.position.z += 0.5f;
     m_sceneObjects.push_back(std::move(copy));
     selectSceneObject(static_cast<int>(m_sceneObjects.size()) - 1);
+    markSceneDirty();
     needsRerender = true;
 }
 
@@ -321,6 +326,7 @@ void TestModule_3DRender::deleteSelectedSceneObject() {
         selectSceneObject(std::min(removed, static_cast<int>(m_sceneObjects.size()) - 1));
     }
     needsRerender = true;
+    markSceneDirty();
 }
 
 const ST::ModelAsset* TestModule_3DRender::getActiveModel() const {
@@ -385,6 +391,7 @@ bool TestModule_3DRender::setSceneObjectTransform(int objectIndex,
         object.scale.z = std::clamp(scale->z, 0.01f, 100.0f);
     }
     needsRerender = true;
+    markSceneDirty();
     return true;
 }
 
@@ -399,12 +406,14 @@ bool TestModule_3DRender::setLightDirection(const ST::Vector3& direction) {
     if (direction.lengthSquared() <= 1e-8f) return false;
     m_light.direction = direction.normalized();
     syncLightAnglesFromDirection();
+    markSceneDirty();
     needsRerender = true;
     return true;
 }
 
 void TestModule_3DRender::setLightIntensity(float intensity) {
     m_light.intensity = std::clamp(intensity, 0.0f, 5.0f);
+    markSceneDirty();
     needsRerender = true;
 }
 
@@ -636,6 +645,7 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
         selectSceneObject(selectedObject >= 0 && selectedObject < static_cast<int>(m_sceneObjects.size())
             ? selectedObject : (m_sceneObjects.empty() ? -1 : 0));
         m_modelError.clear();
+        markSceneSaved();
         needsRerender = true;
     } catch (const std::exception& exception) {
         error = exception.what();
@@ -735,6 +745,7 @@ void TestModule_3DRender::focusSelectedSceneObject() {
     const float sy = std::sin(m_yaw);
     const ST::Vector3 forward(-cp * sy, -sp, -cp * cy);
     m_eye = center - forward * distance;
+    markSceneDirty();
     needsRerender = true;
 }
 
@@ -901,7 +912,10 @@ void TestModule_3DRender::update(float deltaTime) {
     if (keys[SDL_SCANCODE_E]) { m_eye += up_world * move; moved = true; }
     if (keys[SDL_SCANCODE_Q]) { m_eye -= up_world * move; moved = true; }
 
-    if (moved) needsRerender = true;
+    if (moved) {
+        markSceneDirty();
+        needsRerender = true;
+    }
 }
 
 void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) {
@@ -1087,7 +1101,10 @@ bool TestModule_3DRender::renderControls() {
 
     changed |= renderShaderControls();
     changed |= renderModelControls();
-    if (changed) needsRerender = true;
+    if (changed) {
+        markSceneDirty();
+        needsRerender = true;
+    }
     return changed;
 }
 
@@ -1553,6 +1570,7 @@ void TestModule_3DRender::onMouseMove(int x, int y) {
     }
     if (m_pitch >  1.5f) m_pitch =  1.5f;
     if (m_pitch < -1.5f) m_pitch = -1.5f;
+    markSceneDirty();
     needsRerender = true;
 }
 
@@ -1672,6 +1690,7 @@ void TestModule_3DRender::onCanvasMouseMove(int canvasX, int canvasY) {
         }
         m_lastCanvasX = canvasX;
         m_lastCanvasY = canvasY;
+        markSceneDirty();
         needsRerender = true;
         return;
     }
@@ -1684,6 +1703,7 @@ void TestModule_3DRender::onCanvasMouseMove(int canvasX, int canvasY) {
         m_lightPitch = std::clamp(m_lightPitch + static_cast<float>(dy) * 0.012f,
                                   -1.5f, 1.5f);
         updateLightDirectionFromAngles();
+        markSceneDirty();
         needsRerender = true;
         return;
     }

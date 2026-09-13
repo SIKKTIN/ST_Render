@@ -66,6 +66,7 @@ struct EditorPreferences {
     int resolutionIndex = 0;
     int theme = 0; // 0 = dark, 1 = light
     TestModule_3DRender::EditorSettings render;
+    std::vector<std::string> recentScenes;
 };
 
 int main(int argc, char* argv[]) {
@@ -102,6 +103,8 @@ int main(int argc, char* argv[]) {
     EditorPreferences editorPreferences;
     EditorPreferences pendingPreferences;
     const std::filesystem::path editorPreferencesPath = "Data/EditorSettings.json";
+    int scenePathDialogMode = 0; // 1 = open, 2 = save as
+    char scenePathBuffer[512] = {};
 
     // Editor preferences are intentionally separate from scene data. A
     // missing or partially invalid file falls back to safe defaults.
@@ -122,6 +125,12 @@ int main(int argc, char* argv[]) {
             editorPreferences.render.showSelectionOutline = render.value("showSelectionOutline", true);
             editorPreferences.render.cameraSpeed = std::clamp(render.value("cameraSpeed", 2.5f), 0.25f, 20.0f);
             editorPreferences.render.cameraSensitivity = std::clamp(render.value("cameraSensitivity", 0.01f), 0.001f, 0.1f);
+            if (saved.contains("recentScenes") && saved["recentScenes"].is_array()) {
+                for (const auto& recent : saved["recentScenes"]) {
+                    if (recent.is_string()) editorPreferences.recentScenes.push_back(recent.get<std::string>());
+                    if (editorPreferences.recentScenes.size() >= 8) break;
+                }
+            }
         }
     } catch (const std::exception& error) {
         std::cerr << "Editor settings ignored: " << error.what() << std::endl;
@@ -342,13 +351,22 @@ int main(int argc, char* argv[]) {
                     { "showSelectionOutline", editorPreferences.render.showSelectionOutline },
                     { "cameraSpeed", editorPreferences.render.cameraSpeed },
                     { "cameraSensitivity", editorPreferences.render.cameraSensitivity }
-                } }
+                } },
+                { "recentScenes", editorPreferences.recentScenes }
             };
             std::ofstream output(editorPreferencesPath);
             output << saved.dump(2) << '\n';
         } catch (const std::exception& error) {
             std::cerr << "Unable to save editor settings: " << error.what() << std::endl;
         }
+    };
+    auto rememberScenePath = [&](const std::filesystem::path& path) {
+        const std::string normalized = path.lexically_normal().generic_string();
+        auto& recent = editorPreferences.recentScenes;
+        recent.erase(std::remove(recent.begin(), recent.end(), normalized), recent.end());
+        recent.insert(recent.begin(), normalized);
+        if (recent.size() > 8) recent.resize(8);
+        saveEditorPreferences();
     };
     if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
         render3D->applyEditorSettings(editorPreferences.render);
@@ -413,10 +431,18 @@ int main(int argc, char* argv[]) {
             });
         }
 
+        bool sceneDirty = false;
+        if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+            sceneDirty = render3D->isSceneDirty();
+        }
         return ST::AppControlBridge::Json{
             { "application", "ST_Render_Manager" },
             { "running", running },
             { "selectedModule", selectedLeaf() ? selectedLeaf()->getName() : "" },
+            { "scene", {
+                { "path", currentScenePath.string() },
+                { "dirty", sceneDirty }
+            } },
             { "canvas", { { "width", renderSettings.width }, { "height", renderSettings.height } } },
             { "canvasBounds", {
                 { "minX", canvasMinX }, { "minY", canvasMinY },
@@ -572,6 +598,8 @@ int main(int argc, char* argv[]) {
                 ? render3D->saveScene(scenePath, sceneError)
                 : render3D->loadScene(scenePath, sceneError);
             if (!success) throw std::runtime_error(sceneError);
+            render3D->markSceneSaved();
+            rememberScenePath(currentScenePath);
             runModule(selectedModule);
             return ST::AppControlBridge::Json{
                 { "module", "3D Render" },
@@ -760,28 +788,46 @@ int main(int argc, char* argv[]) {
 
     controlBridge.updateState(buildControlState(), true);
 
-    auto saveCurrentScene = [&]() {
+    auto saveSceneAt = [&](const std::filesystem::path& path) {
         auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
         if (!render3D) return false;
         std::string sceneError;
-        const bool saved = render3D->saveScene(currentScenePath.string(), sceneError);
-        consoleOutput = saved ? "Saved scene: " + currentScenePath.string()
+        const bool saved = render3D->saveScene(path.string(), sceneError);
+        consoleOutput = saved ? "Saved scene: " + path.string()
                               : "Save scene failed: " + sceneError;
+        if (saved) {
+            currentScenePath = path;
+            render3D->markSceneSaved();
+            rememberScenePath(currentScenePath);
+        }
         return saved;
     };
-    auto loadCurrentScene = [&]() {
+    auto loadSceneAt = [&](const std::filesystem::path& path) {
         auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf());
         if (!render3D) return false;
         std::string sceneError;
-        const bool loaded = render3D->loadScene(currentScenePath.string(), sceneError);
-        consoleOutput = loaded ? "Loaded scene: " + currentScenePath.string()
+        const bool loaded = render3D->loadScene(path.string(), sceneError);
+        consoleOutput = loaded ? "Loaded scene: " + path.string()
                                : "Load scene failed: " + sceneError;
-        if (loaded) runModule(selectedModule);
+        if (loaded) {
+            currentScenePath = path;
+            render3D->markSceneSaved();
+            rememberScenePath(currentScenePath);
+            runModule(selectedModule);
+        }
         return loaded;
     };
+    auto saveCurrentScene = [&]() { return saveSceneAt(currentScenePath); };
+    auto loadCurrentScene = [&]() { return loadSceneAt(currentScenePath); };
 
     while (running) {
         SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+        std::string windowTitle = "ST Render - Test Manager";
+        if (auto* render3D = dynamic_cast<TestModule_3DRender*>(selectedLeaf())) {
+            windowTitle += " - " + currentScenePath.filename().string();
+            if (render3D->isSceneDirty()) windowTitle += " *";
+        }
+        SDL_SetWindowTitle(window, windowTitle.c_str());
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             ImGui_ImplSDL2_ProcessEvent(&event);
@@ -799,7 +845,13 @@ int main(int argc, char* argv[]) {
                 if (auto* m = selectedLeaf()) m->needsRerender = true;
             }
             if (event.type == SDL_KEYDOWN) {
-                if ((event.key.keysym.mod & KMOD_CTRL) && event.key.keysym.sym == SDLK_s) {
+                if ((event.key.keysym.mod & KMOD_CTRL) && (event.key.keysym.mod & KMOD_SHIFT) &&
+                    event.key.keysym.sym == SDLK_s) {
+                    scenePathDialogMode = 2;
+                    std::strncpy(scenePathBuffer, currentScenePath.string().c_str(), sizeof(scenePathBuffer) - 1);
+                    scenePathBuffer[sizeof(scenePathBuffer) - 1] = '\0';
+                    ImGui::OpenPopup("Scene Path");
+                } else if ((event.key.keysym.mod & KMOD_CTRL) && event.key.keysym.sym == SDLK_s) {
                     saveCurrentScene();
                 } else if ((event.key.keysym.mod & KMOD_CTRL) && event.key.keysym.sym == SDLK_o) {
                     loadCurrentScene();
@@ -956,9 +1008,30 @@ int main(int argc, char* argv[]) {
         float menuBarH = Layout::MENU_BAR_H; // refined to true height after EndMainMenuBar()
         if (ImGui::BeginMainMenuBar()) {
             if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Open Last Scene", "Ctrl+O")) loadCurrentScene();
+                if (ImGui::MenuItem("Open Scene...", "Ctrl+O")) {
+                    scenePathDialogMode = 1;
+                    std::strncpy(scenePathBuffer, currentScenePath.string().c_str(), sizeof(scenePathBuffer) - 1);
+                    scenePathBuffer[sizeof(scenePathBuffer) - 1] = '\0';
+                    ImGui::OpenPopup("Scene Path");
+                }
                 if (ImGui::MenuItem("Save Scene", "Ctrl+S")) saveCurrentScene();
-                ImGui::TextDisabled("Path: %s", currentScenePath.string().c_str());
+                if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S")) {
+                    scenePathDialogMode = 2;
+                    std::strncpy(scenePathBuffer, currentScenePath.string().c_str(), sizeof(scenePathBuffer) - 1);
+                    scenePathBuffer[sizeof(scenePathBuffer) - 1] = '\0';
+                    ImGui::OpenPopup("Scene Path");
+                }
+                if (ImGui::BeginMenu("Recent Scenes")) {
+                    if (editorPreferences.recentScenes.empty()) {
+                        ImGui::TextDisabled("No recent scenes");
+                    } else {
+                        for (const auto& recent : editorPreferences.recentScenes) {
+                            if (ImGui::MenuItem(recent.c_str())) loadSceneAt(recent);
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                ImGui::TextDisabled("Current: %s", currentScenePath.string().c_str());
                 ImGui::Separator();
                 if (ImGui::MenuItem("Exit", "Alt+F4")) { running = false; }
                 ImGui::EndMenu();
@@ -1088,6 +1161,27 @@ int main(int argc, char* argv[]) {
                 if (ImGui::Button("Cancel")) settingsOpen = false;
             }
             ImGui::End();
+        }
+
+        if (ImGui::BeginPopupModal("Scene Path", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::TextUnformatted(scenePathDialogMode == 2 ? "Save scene as" : "Open scene");
+            ImGui::InputText("Path", scenePathBuffer, sizeof(scenePathBuffer));
+            const bool accepted = ImGui::Button(scenePathDialogMode == 2 ? "Save" : "Open");
+            ImGui::SameLine();
+            const bool cancelled = ImGui::Button("Cancel");
+            if (accepted) {
+                const bool success = scenePathDialogMode == 2
+                    ? saveSceneAt(std::filesystem::path(scenePathBuffer))
+                    : loadSceneAt(std::filesystem::path(scenePathBuffer));
+                if (success) {
+                    scenePathDialogMode = 0;
+                    ImGui::CloseCurrentPopup();
+                }
+            } else if (cancelled) {
+                scenePathDialogMode = 0;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
         }
 
         const float contentH = std::max(100.0f, static_cast<float>(windowHeight) - menuBarH);

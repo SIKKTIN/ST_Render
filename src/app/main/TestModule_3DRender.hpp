@@ -86,6 +86,8 @@ public:
     void applyEditorSettings(const EditorSettings& settings);
     bool saveScene(const std::string& path, std::string& error) const;
     bool loadScene(const std::string& path, std::string& error);
+    bool isSceneDirty() const { return m_sceneDirty; }
+    void markSceneSaved() { m_sceneDirty = false; }
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
@@ -136,6 +138,7 @@ private:
     void focusSelectedSceneObject();
     void syncLightAnglesFromDirection();
     void updateLightDirectionFromAngles();
+    void markSceneDirty() { m_sceneDirty = true; }
 
     ST::FrameBuffer* m_frameBuffer;
     ST::DepthBuffer* m_depthBuffer;
@@ -187,6 +190,7 @@ private:
     int m_nextSceneObjectId = 1;
     int m_addModelIndex = -1;
     bool m_modelLoaded = false;
+    bool m_sceneDirty = false;
     ST::ModelCatalog m_modelCatalog;
     int m_selectedModelIndex = -1;
     std::string m_modelError;
