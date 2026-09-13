@@ -264,6 +264,18 @@ private:
     // Reused per-draw vertex transform cache. Indexed meshes otherwise
     // transform the same vertex once for every triangle that references it.
     std::vector<ST::VertexOut> m_vertexCache;
+    struct VertexTransformCacheEntry {
+        const ST::Mesh* mesh = nullptr;
+        const ST::IShaderProgram* shader = nullptr;
+        ST::Matrix4x4 model;
+        ST::Matrix4x4 view;
+        ST::Matrix4x4 projection;
+        std::vector<ST::VertexOut> vertices;
+    };
+    // Static built-in renders can reuse transformed vertices when only
+    // material or lighting parameters changed. The bounded list prevents
+    // camera edits from growing the cache indefinitely.
+    std::vector<VertexTransformCacheEntry> m_vertexTransformCaches;
     std::vector<uint32_t> m_rgba32Buffer;
     SDL_Renderer* m_sdlRenderer = nullptr;
     SDL_Texture* m_outputTexture = nullptr;

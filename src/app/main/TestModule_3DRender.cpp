@@ -339,6 +339,9 @@ bool TestModule_3DRender::replaceSceneObjectModel(int objectIndex, int modelInde
         return false;
     }
 
+    // The loader creates a new mesh allocation. Clear transformed entries so
+    // allocator address reuse cannot make a stale vertex cache look valid.
+    m_vertexTransformCaches.clear();
     SceneObject& object = m_sceneObjects[objectIndex];
     object.modelIndex = modelIndex;
     object.modelPath = entries[modelIndex].relativePath;
@@ -1046,9 +1049,38 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     // Transform each indexed vertex once per draw. The teapot has 3,644
     // vertices but 6,320 triangles; without this cache the vertex shader was
     // invoked up to 18,960 times for one frame instead of 3,644 times.
-    m_vertexCache.resize(verts.size());
-    for (size_t vertexIndex = 0; vertexIndex < verts.size(); ++vertexIndex) {
-        m_vertexCache[vertexIndex] = shader->vertex(verts[vertexIndex], shaderContext);
+    const std::vector<ST::VertexOut>* transformedVertices = nullptr;
+    if (!m_interactionActive && shader == m_builtinShader) {
+        for (auto& cache : m_vertexTransformCaches) {
+            if (cache.mesh == &mesh && cache.shader == shader.get() &&
+                cache.model == model && cache.view == view && cache.projection == projection &&
+                cache.vertices.size() == verts.size()) {
+                transformedVertices = &cache.vertices;
+                break;
+            }
+        }
+        if (!transformedVertices) {
+            if (m_vertexTransformCaches.size() >= 32) {
+                m_vertexTransformCaches.erase(m_vertexTransformCaches.begin());
+            }
+            auto& cache = m_vertexTransformCaches.emplace_back();
+            cache.mesh = &mesh;
+            cache.shader = shader.get();
+            cache.model = model;
+            cache.view = view;
+            cache.projection = projection;
+            cache.vertices.resize(verts.size());
+            for (size_t vertexIndex = 0; vertexIndex < verts.size(); ++vertexIndex) {
+                cache.vertices[vertexIndex] = shader->vertex(verts[vertexIndex], shaderContext);
+            }
+            transformedVertices = &cache.vertices;
+        }
+    } else {
+        m_vertexCache.resize(verts.size());
+        for (size_t vertexIndex = 0; vertexIndex < verts.size(); ++vertexIndex) {
+            m_vertexCache[vertexIndex] = shader->vertex(verts[vertexIndex], shaderContext);
+        }
+        transformedVertices = &m_vertexCache;
     }
 
     // Compute the mesh's world-space bounding sphere once per drawMesh call.
@@ -1068,9 +1100,9 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     bool cameraInside = cameraToCenter.length() < boundingRadius;
 
     for (int i = 0; i + 2 < (int)idx.size(); i += 3) {
-        ST::VertexOut v0 = m_vertexCache[idx[i + 0]];
-        ST::VertexOut v1 = m_vertexCache[idx[i + 1]];
-        ST::VertexOut v2 = m_vertexCache[idx[i + 2]];
+        ST::VertexOut v0 = (*transformedVertices)[idx[i + 0]];
+        ST::VertexOut v1 = (*transformedVertices)[idx[i + 1]];
+        ST::VertexOut v2 = (*transformedVertices)[idx[i + 2]];
 
         // ---- Back-face culling, inside-aware ----
         // The outward face normal is (v1 - v0) x (v2 - v0) in world space.

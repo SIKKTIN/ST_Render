@@ -40,8 +40,14 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		m_environmentTextureWidth = 0;
 		m_environmentTextureHeight = 0;
 		m_hasEnvironmentTexture = false;
-		m_filteredEnvironmentWidth = 256;
-		m_filteredEnvironmentHeight = 128;
+		m_filteredEnvironmentWidths[0] = 256;
+		m_filteredEnvironmentWidths[1] = 128;
+		m_filteredEnvironmentWidths[2] = 64;
+		m_filteredEnvironmentWidths[3] = 32;
+		m_filteredEnvironmentHeights[0] = 128;
+		m_filteredEnvironmentHeights[1] = 64;
+		m_filteredEnvironmentHeights[2] = 32;
+		m_filteredEnvironmentHeights[3] = 16;
     }
 
 	void FragmentShader::setMaterial(const Material& mat) {
@@ -89,22 +95,42 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 		m_environmentTextureWidth = width;
 		m_environmentTextureHeight = height;
 		m_hasEnvironmentTexture = m_environmentTexture != nullptr && width > 0 && height > 0;
-		m_filteredEnvironmentTexture.clear();
+		m_filteredEnvironmentLevels.clear();
 		if (!m_hasEnvironmentTexture) return;
 
 		// The source environment is a high-frequency tonemapped panorama. Build
-		// a small filtered copy once when the map changes; sampling this cache
-		// prevents bright single-pixel texels from turning into static sparkle.
-		m_filteredEnvironmentTexture.resize(
-			static_cast<size_t>(m_filteredEnvironmentWidth) * m_filteredEnvironmentHeight);
-		for (int y = 0; y < m_filteredEnvironmentHeight; ++y) {
-			for (int x = 0; x < m_filteredEnvironmentWidth; ++x) {
-				const float u = (static_cast<float>(x) + 0.5f) /
-					static_cast<float>(m_filteredEnvironmentWidth);
-				const float v = (static_cast<float>(y) + 0.5f) /
-					static_cast<float>(m_filteredEnvironmentHeight);
-				m_filteredEnvironmentTexture[static_cast<size_t>(y) * m_filteredEnvironmentWidth + x] =
-					sampleTextureBilinearFrom(*m_environmentTexture, width, height, Vector2(u, v));
+		// a small box-filtered mip chain once when the map changes. Roughness can
+		// then select a blur level with one lookup per fragment instead of doing
+		// several expensive panorama samples for every pixel.
+		m_filteredEnvironmentLevels.reserve(4);
+		for (int level = 0; level < 4; ++level) {
+			const std::vector<Color>* source = level == 0
+				? m_environmentTexture
+				: &m_filteredEnvironmentLevels[level - 1];
+			const int sourceWidth = level == 0 ? width : m_filteredEnvironmentWidths[level - 1];
+			const int sourceHeight = level == 0 ? height : m_filteredEnvironmentHeights[level - 1];
+			const int outputWidth = m_filteredEnvironmentWidths[level];
+			const int outputHeight = m_filteredEnvironmentHeights[level];
+			auto& output = m_filteredEnvironmentLevels.emplace_back(
+				static_cast<size_t>(outputWidth) * outputHeight);
+			for (int y = 0; y < outputHeight; ++y) {
+				for (int x = 0; x < outputWidth; ++x) {
+					const float u = (static_cast<float>(x) + 0.5f) /
+						static_cast<float>(outputWidth);
+					const float v = (static_cast<float>(y) + 0.5f) /
+						static_cast<float>(outputHeight);
+					const float du = 0.35f / static_cast<float>(outputWidth);
+					const float dv = 0.35f / static_cast<float>(outputHeight);
+					Color filtered = sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
+						Vector2(u - du, v - dv));
+					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
+						Vector2(u + du, v - dv));
+					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
+						Vector2(u - du, v + dv));
+					filtered += sampleTextureBilinearFrom(*source, sourceWidth, sourceHeight,
+						Vector2(u + du, v + dv));
+					output[static_cast<size_t>(y) * outputWidth + x] = filtered * 0.25f;
+				}
 			}
 		}
 	}
@@ -404,9 +430,20 @@ Color sampleTextureBilinearFrom(const std::vector<Color>& texture, int width, in
 			const float pi = 3.14159265359f;
 			const float u = 0.5f + std::atan2(reflection.z, reflection.x) / (2.0f * pi);
 			const float v = 0.5f - std::asin(clamp(reflection.y, -1.0f, 1.0f)) / pi;
-			const Color environmentSample = sampleTextureBilinearFrom(
-				m_filteredEnvironmentTexture, m_filteredEnvironmentWidth, m_filteredEnvironmentHeight,
-				Vector2(u, v));
+			const float environmentMip = roughness * 3.0f;
+			const int environmentLevel0 = std::clamp(static_cast<int>(std::floor(environmentMip)), 0, 3);
+			const int environmentLevel1 = std::min(3, environmentLevel0 + 1);
+			const float environmentLevelBlend = environmentMip - static_cast<float>(environmentLevel0);
+			const Color environmentSample0 = sampleTextureBilinearFrom(
+				m_filteredEnvironmentLevels[environmentLevel0],
+				m_filteredEnvironmentWidths[environmentLevel0],
+				m_filteredEnvironmentHeights[environmentLevel0], Vector2(u, v));
+			const Color environmentSample1 = sampleTextureBilinearFrom(
+				m_filteredEnvironmentLevels[environmentLevel1],
+				m_filteredEnvironmentWidths[environmentLevel1],
+				m_filteredEnvironmentHeights[environmentLevel1], Vector2(u, v));
+			const Color environmentSample = Color::lerp(
+				environmentSample0, environmentSample1, environmentLevelBlend);
 			environment = Vector3(environmentSample.r, environmentSample.g, environmentSample.b) *
 				m_environmentIntensity;
 		}

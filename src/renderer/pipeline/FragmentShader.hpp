@@ -134,9 +134,9 @@ namespace ST {
 		int m_environmentTextureWidth;
 		int m_environmentTextureHeight;
 		bool m_hasEnvironmentTexture;
-		std::vector<Color> m_filteredEnvironmentTexture;
-		int m_filteredEnvironmentWidth;
-		int m_filteredEnvironmentHeight;
+        std::vector<std::vector<Color>> m_filteredEnvironmentLevels;
+        int m_filteredEnvironmentWidths[4];
+        int m_filteredEnvironmentHeights[4];
 		Vector3 m_viewPosition;
 
 		const std::vector<Color>* m_texture;
