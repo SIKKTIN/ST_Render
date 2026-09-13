@@ -59,10 +59,14 @@ try:
     models = request("tools/call", {"name": "list_models", "arguments": {}})
     model_entries = models["structuredContent"]["models"]
     assert model_entries, models
+    assert any(entry["path"] == "vault_door/vault_door.obj" for entry in model_entries), models
 
     textures = request("tools/call", {"name": "list_textures", "arguments": {}})
     texture_entries = textures["structuredContent"]["textures"]
     assert any(entry["path"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png" for entry in texture_entries), textures
+    assert any(entry["path"] == "rough_pine_door/rough_pine_door_diff_1k.jpg" for entry in texture_entries), textures
+    assert any(entry["path"] == "rough_pine_door/rough_pine_door_rough_1k.jpg" for entry in texture_entries), textures
+    assert any(entry["path"] == "rough_pine_door/rough_pine_door_nor_dx_1k.jpg" for entry in texture_entries), textures
     normal_entry = next(entry for entry in texture_entries if entry["path"] == "metal_plate_02/metal_plate_02_nor_dx_1k.png")
     selected_texture = request("tools/call", {
         "name": "select_texture",
@@ -82,6 +86,20 @@ try:
     assert selected_maps["roughness"].endswith("metal_plate_02_rough_1k.png"), selected_maps
     assert selected_maps["metallic"].endswith("metal_plate_02_metal_1k.png"), selected_maps
     assert selected_maps["normal"].endswith("metal_plate_02_nor_dx_1k.png"), selected_maps
+
+    loaded_door = request("tools/call", {
+        "name": "load_scene",
+        "arguments": {"path": "Data/ScenePrefab/vault_door_pbr.scene.json"},
+    })
+    assert loaded_door["structuredContent"]["objectCount"] == 1, loaded_door
+    door_scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
+    door_object = door_scene["structuredContent"]["objects"][0]
+    assert door_object["modelPath"] == "vault_door/vault_door.obj", door_scene
+    door_maps = request("tools/call", {"name": "list_textures", "arguments": {}})
+    door_selected_maps = door_maps["structuredContent"]["selectedTextures"]
+    assert door_selected_maps["diffuse"].endswith("rough_pine_door_diff_1k.jpg"), door_maps
+    assert door_selected_maps["roughness"].endswith("rough_pine_door_rough_1k.jpg"), door_maps
+    assert door_selected_maps["normal"].endswith("rough_pine_door_nor_dx_1k.jpg"), door_maps
 
     scene = request("tools/call", {"name": "list_scene_objects", "arguments": {}})
     assert len(scene["structuredContent"]["objects"]) == 1, scene

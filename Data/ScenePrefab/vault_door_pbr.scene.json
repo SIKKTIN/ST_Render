@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "sceneName": "vault_door_pbr",
+  "camera": {
+    "eye": [1.8, 1.2, 3.8],
+    "yaw": 0.0,
+    "pitch": 0.12,
+    "moveSpeed": 2.5
+  },
+  "lighting": {
+    "enabled": true,
+    "ambient": [0.12, 0.12, 0.12],
+    "environmentColor": [0.16, 0.2, 0.28],
+    "environmentIntensity": 0.35,
+    "toneMapping": true,
+    "exposure": 1.0,
+    "environmentMap": "environment/studio_small_01.jpg",
+    "direction": [-0.3244, -0.8111, -0.4867],
+    "color": [1.0, 1.0, 1.0, 1.0],
+    "intensity": 1.4
+  },
+  "material": {
+    "ambient": [0.1, 0.1, 0.1],
+    "diffuse": [0.8, 0.8, 0.8],
+    "specular": [0.5, 0.5, 0.5],
+    "shininess": 32.0,
+    "metallic": 0.0,
+    "roughness": 0.58,
+    "normalStrength": 0.75,
+    "emission": [0.0, 0.0, 0.0]
+  },
+  "shader": "",
+  "selectedObject": 0,
+  "objects": [
+    {
+      "id": 1,
+      "name": "Vault Door (Rough Pine PBR)",
+      "model": "vault_door/vault_door.obj",
+      "diffuseTexture": "rough_pine_door/rough_pine_door_diff_1k.jpg",
+      "roughnessTexture": "rough_pine_door/rough_pine_door_rough_1k.jpg",
+      "metallicTexture": "",
+      "normalTexture": "rough_pine_door/rough_pine_door_nor_dx_1k.jpg",
+      "visible": true,
+      "position": [0.0, 0.0, -1.92],
+      "rotation": [0.0, 90.0, 0.0],
+      "scale": [1.0, 1.0, 1.0],
+      "material": {
+        "ambient": [0.1, 0.1, 0.1],
+        "diffuse": [0.8, 0.8, 0.8],
+        "specular": [0.5, 0.5, 0.5],
+        "shininess": 32.0,
+        "metallic": 0.0,
+        "roughness": 0.58,
+        "normalStrength": 0.75,
+        "emission": [0.0, 0.0, 0.0]
+      }
+    }
+  ]
+}

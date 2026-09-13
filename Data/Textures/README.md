@@ -18,3 +18,19 @@ an LDR equirectangular reflection source until the renderer gains HDR image
 decoding.
 
 Source: https://polyhaven.com/a/studio_small_01
+
+## Vault door PBR test
+
+`rough_pine_door/` is the 1K JPG PBR set from Poly Haven's **Rough Pine Door**
+asset. It is used by `Data/ScenePrefab/vault_door_pbr.scene.json` for the
+downloaded vault-door test model. The scene uses the diffuse, roughness, and
+DirectX normal maps; metallic is intentionally left at zero because the test
+material represents painted wood.
+
+Poly Haven publishes this asset under the CC0 license:
+
+https://polyhaven.com/a/rough_pine_door
+
+The model is the CC0 **Vault Door** asset from OpenGameArt:
+
+https://opengameart.org/content/vault-door
