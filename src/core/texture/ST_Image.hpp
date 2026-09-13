@@ -14,7 +14,7 @@ public:
     Image() : m_width(0), m_height(0), m_channels(0) {}
 
     bool load(const char* path) {
-        return load(path, 0);
+        return load(path, 0, true);
     }
 
     // Load an image, optionally limiting its largest dimension.  The software
@@ -22,8 +22,15 @@ public:
     // source maps at their original resolution can consume hundreds of MB per
     // texture.  A zero maxDimension preserves the original behaviour.
     bool load(const char* path, int maxDimension) {
+        return load(path, maxDimension, true);
+    }
+
+    // Some FBX exports keep texture V coordinates in the source-image
+    // orientation. Callers can opt out of the repository-wide vertical flip
+    // when the asset's UV convention is known explicitly.
+    bool load(const char* path, int maxDimension, bool flipVertical) {
         m_pixels.clear();
-        stbi_set_flip_vertically_on_load(true);
+        stbi_set_flip_vertically_on_load(flipVertical ? 1 : 0);
         int w, h, ch;
         unsigned char* data = stbi_load(path, &w, &h, &ch, 3);
         if (!data) return false;

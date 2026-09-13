@@ -545,10 +545,15 @@ Color srgbToLinear(const Color& color) {
 		const Vector3 environmentFresnel = f0 +
 			(Vector3(1.0f - roughness, 1.0f - roughness, 1.0f - roughness) - f0) *
 			environmentFresnelFactor;
+		// Dielectric surfaces should show a restrained studio reflection; the
+		// environment specular term is primarily the energy source for metals.
+		// Without this weighting, a dark environment reflection overwhelms the
+		// brown albedo of the non-metal grip.
+		const float environmentSpecularWeight = metallic + (1.0f - metallic) * 0.05f;
 		Vector3 totalLight = m_ambient * m_material.ambient *
 			(baseColor * (1.0f - metallic) + f0 * 0.8f) +
 			diffuseEnvironment * baseColor * (1.0f - metallic) +
-			specularEnvironment * environmentFresnel;
+			specularEnvironment * environmentFresnel * environmentSpecularWeight;
 
 		for (const auto& light : m_lights) {
 			Vector3 lightDir;
@@ -604,7 +609,6 @@ Color srgbToLinear(const Color& color) {
 				std::pow(std::max(0.0f, result.z), 1.0f / 2.2f)
 			);
 		}
-
 		return Color(saturate(result), texColor.a);
 	}
 }

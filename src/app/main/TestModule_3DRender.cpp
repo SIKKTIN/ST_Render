@@ -480,6 +480,19 @@ void TestModule_3DRender::buildPartMaterials(SceneObject& object) {
         target.material.roughness = source.roughnessTexturePath.empty()
             ? std::clamp(source.roughnessFactor, 0.02f, 1.0f) : 1.0f;
         target.material.normalStrength = std::clamp(source.normalStrength, 0.0f, 2.0f);
+		// The supplied Grip material contains a shared metallic mask for small
+		// fasteners, but the visible grip panel itself is wood/non-metal. Treat
+		// the part as a dielectric so blue environment reflections cannot wash
+		// out its brown base-color texture.
+		const bool isGrip = source.name.find("Grip") != std::string::npos ||
+			part.name.find("Grip") != std::string::npos;
+		if (isGrip) {
+			target.material.metallicFactor = 0.0f;
+			target.material.roughness = std::max(target.material.roughness, 0.62f);
+			// A small warm fill keeps the non-metal grip readable when the
+			// studio panorama has no direct light on the handle.
+			target.material.emission = ST::Vector3(0.018f, 0.005f, 0.001f);
+		}
 
         const auto loadTexture = [&](const std::string& path,
                                      ST::Image& image,
@@ -494,7 +507,9 @@ void TestModule_3DRender::buildPartMaterials(SceneObject& object) {
             // pixels as float Colors, so cap imported FBX maps at 512 to keep
             // all four maps per part within a predictable software-renderer
             // memory budget while retaining enough detail for the viewport.
-            if (!image.load(resolvedPath.c_str(), 512)) {
+            // M1911's FBX UVs match the source texture orientation. Do not
+            // apply the generic OBJ/image vertical flip to this atlas.
+            if (!image.load(resolvedPath.c_str(), 512, false)) {
                 missing.push_back(part.name + " " + label + ": " + path);
                 return false;
             }
