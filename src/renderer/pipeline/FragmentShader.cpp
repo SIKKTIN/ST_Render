@@ -202,6 +202,12 @@ namespace ST {
 	Color FragmentShader::shadeBlinnPhong(const Fragment& fragment) {
 		Vector3 viewDir = (m_viewPosition - fragment.worldPosition).normalized();
 		Vector3 totalLight = m_ambient * m_material.ambient;
+		const float metallic = clamp(m_material.metallicFactor, 0.0f, 1.0f);
+		const float roughness = clamp(m_material.roughness, 0.02f, 1.0f);
+		const float specularPower = std::max(1.0f,
+			(1.0f - roughness) * (1.0f - roughness) * 256.0f);
+		const Vector3 specularColor =
+			m_material.specular * (1.0f - metallic) + m_material.diffuse * metallic;
 
 		for (const auto& light : m_lights) {
 			Vector3 lightDir;
@@ -217,12 +223,13 @@ namespace ST {
 			}
 
 			float diff = std::max(0.0f, fragment.normal.dot(lightDir));
-			Vector3 diffuse = m_material.diffuse * diff * light.color.rgb * light.intensity * attenuation;
+			Vector3 diffuse = m_material.diffuse * (diff * (1.0f - metallic)) *
+				light.color.rgb * light.intensity * attenuation;
 
 			// Blinn-Phong: use half-vector
 			Vector3 halfDir = (lightDir + viewDir).normalized();
-			float spec = std::pow(std::max(0.0f, fragment.normal.dot(halfDir)), m_material.shininess);
-			Vector3 specular = m_material.specular * spec * light.color.rgb * light.intensity * attenuation;
+			float spec = std::pow(std::max(0.0f, fragment.normal.dot(halfDir)), specularPower);
+			Vector3 specular = specularColor * spec * light.color.rgb * light.intensity * attenuation;
 
 			totalLight = totalLight + diffuse + specular;
 		}
@@ -231,8 +238,8 @@ namespace ST {
 		Vector3 result = Vector3(totalLight.x * texColor.r,
 			totalLight.y * texColor.g,
 			totalLight.z * texColor.b);
+		result = result + m_material.emission;
 
 		return Color(saturate(result), texColor.a);
 	}
 }
-

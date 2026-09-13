@@ -469,7 +469,10 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
             { "ambient", vectorJson(m_material.ambient) },
             { "diffuse", vectorJson(m_material.diffuse) },
             { "specular", vectorJson(m_material.specular) },
-            { "shininess", m_material.shininess }
+            { "shininess", m_material.shininess },
+            { "metallic", m_material.metallicFactor },
+            { "roughness", m_material.roughness },
+            { "emission", vectorJson(m_material.emission) }
         } },
         { "shader", (m_selectedShaderIndex >= 0 &&
                       m_selectedShaderIndex < static_cast<int>(m_shaderCatalog.getEntries().size()))
@@ -492,7 +495,10 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
                 { "ambient", vectorJson(object.material.ambient) },
                 { "diffuse", vectorJson(object.material.diffuse) },
                 { "specular", vectorJson(object.material.specular) },
-                { "shininess", object.material.shininess }
+                { "shininess", object.material.shininess },
+                { "metallic", object.material.metallicFactor },
+                { "roughness", object.material.roughness },
+                { "emission", vectorJson(object.material.emission) }
             } }
         });
     }
@@ -609,6 +615,9 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                 if (material.contains("diffuse")) m_sceneObjects.back().material.diffuse = readVector(material["diffuse"], "material diffuse");
                 if (material.contains("specular")) m_sceneObjects.back().material.specular = readVector(material["specular"], "material specular");
                 m_sceneObjects.back().material.shininess = std::clamp(material.value("shininess", 32.0f), 1.0f, 256.0f);
+                m_sceneObjects.back().material.metallicFactor = std::clamp(material.value("metallic", 0.0f), 0.0f, 1.0f);
+                m_sceneObjects.back().material.roughness = std::clamp(material.value("roughness", 0.5f), 0.02f, 1.0f);
+                if (material.contains("emission")) m_sceneObjects.back().material.emission = readVector(material["emission"], "material emission");
             }
             maxId = std::max(maxId, m_sceneObjects.back().id);
         }
@@ -635,6 +644,9 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
             if (material.contains("diffuse")) m_material.diffuse = readVector(material["diffuse"], "material diffuse");
             if (material.contains("specular")) m_material.specular = readVector(material["specular"], "material specular");
             m_material.shininess = std::clamp(material.value("shininess", m_material.shininess), 1.0f, 256.0f);
+            m_material.metallicFactor = std::clamp(material.value("metallic", m_material.metallicFactor), 0.0f, 1.0f);
+            m_material.roughness = std::clamp(material.value("roughness", m_material.roughness), 0.02f, 1.0f);
+            if (material.contains("emission")) m_material.emission = readVector(material["emission"], "material emission");
         }
 
         const std::string shaderPath = scene.value("shader", std::string());
@@ -1101,10 +1113,18 @@ bool TestModule_3DRender::renderControls() {
         m_selectedSceneObject < static_cast<int>(m_sceneObjects.size())) {
         editedMaterial = &m_sceneObjects[m_selectedSceneObject].material;
     }
-    changed |= ImGui::ColorEdit3("Material diffuse", &editedMaterial->diffuse.x);
-    changed |= ImGui::ColorEdit3("Material specular", &editedMaterial->specular.x);
-    changed |= ImGui::SliderFloat("Shininess", &editedMaterial->shininess, 1.0f, 256.0f);
-    changed |= ImGui::ColorEdit3("Ambient", &m_ambientLight.x);
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Material Inspector");
+    changed |= ImGui::ColorEdit3("Base Color", &editedMaterial->diffuse.x);
+    changed |= ImGui::SliderFloat("Metallic", &editedMaterial->metallicFactor, 0.0f, 1.0f);
+    changed |= ImGui::SliderFloat("Roughness", &editedMaterial->roughness, 0.02f, 1.0f);
+    changed |= ImGui::ColorEdit3("Emission", &editedMaterial->emission.x);
+    ImGui::Separator();
+    ImGui::TextDisabled("Advanced lighting");
+    changed |= ImGui::ColorEdit3("Ambient", &editedMaterial->ambient.x);
+    changed |= ImGui::ColorEdit3("Specular", &editedMaterial->specular.x);
+    changed |= ImGui::SliderFloat("Legacy shininess", &editedMaterial->shininess, 1.0f, 256.0f);
+    changed |= ImGui::ColorEdit3("Ambient light", &m_ambientLight.x);
     if (ImGui::Button("Reset Light")) {
         m_light.direction = ST::Vector3(-0.4f, -1.0f, -0.6f).normalized();
         m_light.color = ST::Color::white();

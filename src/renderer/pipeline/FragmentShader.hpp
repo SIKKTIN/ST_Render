@@ -48,6 +48,11 @@ namespace ST {
 		Vector3 diffuse;
 		Vector3 specular;
 		float shininess;
+		// PBR-ready controls. The built-in shader uses these to shape its
+		// Blinn-Phong response while script/PBR shaders may consume them directly.
+		float metallicFactor;
+		float roughness;
+		Vector3 emission;
 
 		static Material defaultMaterial() {
 			Material mat;
@@ -55,6 +60,9 @@ namespace ST {
 			mat.diffuse = Vector3(0.8f, 0.8f, 0.8f);
 			mat.specular = Vector3(0.5f, 0.5f, 0.5f);
 			mat.shininess = 32.0f;
+			mat.metallicFactor = 0.0f;
+			mat.roughness = 0.5f;
+			mat.emission = Vector3::zero();
 			return mat;
 		}
 
@@ -64,6 +72,9 @@ namespace ST {
 			mat.diffuse = color * 0.6f;
 			mat.specular = Vector3(1.0f, 1.0f, 1.0f);
 			mat.shininess = 128.0f * (1.0f - roughness);
+			mat.metallicFactor = 1.0f;
+			mat.roughness = std::clamp(roughness, 0.02f, 1.0f);
+			mat.emission = Vector3::zero();
 			return mat;
 		}
 	};
