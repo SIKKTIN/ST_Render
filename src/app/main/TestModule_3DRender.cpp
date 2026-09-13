@@ -450,7 +450,8 @@ bool TestModule_3DRender::saveScene(const std::string& path, std::string& error)
     };
 
     Json scene = {
-        { "version", 1 },
+        { "version", 2 },
+        { "sceneName", std::filesystem::path(path).stem().string() },
         { "camera", {
             { "eye", vectorJson(m_eye) },
             { "yaw", m_yaw },
@@ -535,6 +536,7 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
                          value.size() == 4 ? value[3].get<float>() : 1.0f);
     };
 
+    m_sceneWarning.clear();
     try {
         std::ifstream input(path);
         if (!input) {
@@ -543,10 +545,12 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
         }
         Json scene;
         input >> scene;
-        if (!scene.is_object() || scene.value("version", 0) != 1) {
+        const int version = scene.value("version", 1);
+        if (!scene.is_object() || version < 1 || version > 2) {
             error = "unsupported scene version";
             return false;
         }
+        const bool migratedFromV1 = version == 1;
         if (!scene.contains("objects") || !scene["objects"].is_array()) {
             error = "scene objects array is missing";
             return false;
@@ -637,6 +641,9 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
         const int shaderIndex = m_shaderCatalog.findByRelativePath(shaderPath);
         if (shaderIndex >= 0) {
             selectShaderIndex(shaderIndex);
+        } else if (!shaderPath.empty()) {
+            useBuiltinShader();
+            m_sceneWarning = "Shader asset not found: " + shaderPath + ". Using built-in shader.";
         } else {
             useBuiltinShader();
         }
@@ -645,7 +652,14 @@ bool TestModule_3DRender::loadScene(const std::string& path, std::string& error)
         selectSceneObject(selectedObject >= 0 && selectedObject < static_cast<int>(m_sceneObjects.size())
             ? selectedObject : (m_sceneObjects.empty() ? -1 : 0));
         m_modelError.clear();
-        markSceneSaved();
+        if (migratedFromV1) {
+            m_sceneWarning = m_sceneWarning.empty()
+                ? "Loaded legacy scene version 1. Save to upgrade it to version 2."
+                : m_sceneWarning + " Loaded legacy scene version 1; save to upgrade it to version 2.";
+            m_sceneDirty = true;
+        } else {
+            markSceneSaved();
+        }
         needsRerender = true;
     } catch (const std::exception& exception) {
         error = exception.what();
@@ -1101,6 +1115,10 @@ bool TestModule_3DRender::renderControls() {
 
     changed |= renderShaderControls();
     changed |= renderModelControls();
+    if (!m_sceneWarning.empty()) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "Scene warning");
+        ImGui::TextWrapped("%s", m_sceneWarning.c_str());
+    }
     if (changed) {
         markSceneDirty();
         needsRerender = true;

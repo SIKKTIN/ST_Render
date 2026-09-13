@@ -86,8 +86,9 @@ public:
     void applyEditorSettings(const EditorSettings& settings);
     bool saveScene(const std::string& path, std::string& error) const;
     bool loadScene(const std::string& path, std::string& error);
+    const std::string& getSceneWarning() const { return m_sceneWarning; }
     bool isSceneDirty() const { return m_sceneDirty; }
-    void markSceneSaved() { m_sceneDirty = false; }
+    void markSceneSaved() { m_sceneDirty = false; m_sceneWarning.clear(); }
 
     void onMouseDown(int button, int x, int y) override;
     void onMouseUp(int button) override;
@@ -191,6 +192,7 @@ private:
     int m_addModelIndex = -1;
     bool m_modelLoaded = false;
     bool m_sceneDirty = false;
+    std::string m_sceneWarning;
     ST::ModelCatalog m_modelCatalog;
     int m_selectedModelIndex = -1;
     std::string m_modelError;

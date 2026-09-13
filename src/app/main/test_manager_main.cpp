@@ -605,7 +605,8 @@ int main(int argc, char* argv[]) {
                 { "module", "3D Render" },
                 { "path", scenePath },
                 { "selectedObject", render3D->getSelectedSceneObjectIndex() },
-                { "objectCount", static_cast<int>(render3D->getSceneObjectInfos().size()) }
+                { "objectCount", static_cast<int>(render3D->getSceneObjectInfos().size()) },
+                { "warning", render3D->getSceneWarning() }
             };
         }
 
