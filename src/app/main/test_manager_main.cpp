@@ -42,7 +42,8 @@ namespace Layout {
     constexpr float RIGHT_PANEL_MIN   = 120.0f;
     constexpr float RIGHT_PANEL_MAX   = 480.0f;
     constexpr float TOP_AREA_H        = 550.0f;     // controls panel height
-    constexpr int   SPLITTER_HALF_W   = 4;          // vertical splitter strip width / 2
+    constexpr int   SPLITTER_HALF_W   = 8;          // invisible drag hit area half-width
+    constexpr int   SPLITTER_LINE_HALF_W = 1;       // visible divider half-width
 }
 
 struct RenderResolution {
@@ -1481,9 +1482,15 @@ int main(int argc, char* argv[]) {
             ImVec2 wp = ImGui::GetWindowPos();
             ImU32 col = IM_COL32(55, 55, 55, 255);
             if (ImGui::IsItemHovered() || draggingCreateSplitter) col = IM_COL32(80, 130, 255, 255);
-            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + contentH), col);
+            dl->AddRectFilled(
+                ImVec2(wp.x + Layout::SPLITTER_HALF_W - Layout::SPLITTER_LINE_HALF_W, wp.y),
+                ImVec2(wp.x + Layout::SPLITTER_HALF_W + Layout::SPLITTER_LINE_HALF_W, wp.y + contentH),
+                col);
 
-            if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                ImGui::SetTooltip("Drag to resize panels");
+            }
             if (draggingCreateSplitter) {
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                 if (!ImGui::IsMouseDown(0)) {
@@ -1518,9 +1525,15 @@ int main(int argc, char* argv[]) {
             ImVec2 wp = ImGui::GetWindowPos();
             ImU32 col = IM_COL32(55, 55, 55, 255);
             if (ImGui::IsItemHovered() || draggingRightSplitter) col = IM_COL32(80, 130, 255, 255);
-            dl->AddRectFilled(ImVec2(wp.x, wp.y), ImVec2(wp.x + 2.0f * Layout::SPLITTER_HALF_W, wp.y + contentH), col);
+            dl->AddRectFilled(
+                ImVec2(wp.x + Layout::SPLITTER_HALF_W - Layout::SPLITTER_LINE_HALF_W, wp.y),
+                ImVec2(wp.x + Layout::SPLITTER_HALF_W + Layout::SPLITTER_LINE_HALF_W, wp.y + contentH),
+                col);
 
-            if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                ImGui::SetTooltip("Drag to resize panels");
+            }
             if (draggingRightSplitter) {
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                 if (!ImGui::IsMouseDown(0)) {
