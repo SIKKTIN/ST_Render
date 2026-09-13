@@ -574,7 +574,36 @@ void TestModule_3DRender::applyEditorSettings(const EditorSettings& settings) {
     m_showSelectionOutline = settings.showSelectionOutline;
     m_moveSpeed = std::clamp(settings.cameraSpeed, m_moveSpeedMin, m_moveSpeedMax);
     m_cameraSensitivity = std::clamp(settings.cameraSensitivity, 0.001f, 0.1f);
+    m_adaptivePreview = false;
+    m_frameTimeHistory.clear();
     needsRerender = true;
+}
+
+void TestModule_3DRender::recordPerformanceSample(double frameTimeMs) {
+    m_frameTimeHistory.push_back(frameTimeMs);
+    while (m_frameTimeHistory.size() > 30) m_frameTimeHistory.pop_front();
+
+    if (!m_frameTimeHistory.empty()) {
+        double sum = 0.0;
+        m_minFrameTimeMs = m_frameTimeHistory.front();
+        m_maxFrameTimeMs = m_frameTimeHistory.front();
+        for (const double sample : m_frameTimeHistory) {
+            sum += sample;
+            m_minFrameTimeMs = std::min(m_minFrameTimeMs, sample);
+            m_maxFrameTimeMs = std::max(m_maxFrameTimeMs, sample);
+        }
+        m_averageFrameTimeMs = sum / static_cast<double>(m_frameTimeHistory.size());
+    }
+
+    // Adaptive mode makes one controlled quality step when a completed frame
+    // exceeds the 30 FPS budget. It does not continuously render in the
+    // background: the current frame is finished, then the normal dirty-frame
+    // path performs one preview rerender.
+    if (m_renderQuality == 0 && !m_interactionActive && !m_adaptivePreview &&
+        m_averageFrameTimeMs > 33.0) {
+        m_adaptivePreview = true;
+        needsRerender = true;
+    }
 }
 
 bool TestModule_3DRender::saveScene(const std::string& path, std::string& error) const {
@@ -1045,6 +1074,7 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
 
     const auto& verts = mesh.getVertices();
     const auto& idx = mesh.getIndices();
+    const auto vertexStageStart = std::chrono::steady_clock::now();
 
     // Transform each indexed vertex once per draw. The teapot has 3,644
     // vertices but 6,320 triangles; without this cache the vertex shader was
@@ -1056,10 +1086,12 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
                 cache.model == model && cache.view == view && cache.projection == projection &&
                 cache.vertices.size() == verts.size()) {
                 transformedVertices = &cache.vertices;
+                ++m_currentCacheHits;
                 break;
             }
         }
         if (!transformedVertices) {
+            ++m_currentCacheMisses;
             if (m_vertexTransformCaches.size() >= 32) {
                 m_vertexTransformCaches.erase(m_vertexTransformCaches.begin());
             }
@@ -1076,12 +1108,15 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
             transformedVertices = &cache.vertices;
         }
     } else {
+        ++m_currentCacheMisses;
         m_vertexCache.resize(verts.size());
         for (size_t vertexIndex = 0; vertexIndex < verts.size(); ++vertexIndex) {
             m_vertexCache[vertexIndex] = shader->vertex(verts[vertexIndex], shaderContext);
         }
         transformedVertices = &m_vertexCache;
     }
+    m_currentVertexStageMs += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - vertexStageStart).count();
 
     // Compute the mesh's world-space bounding sphere once per drawMesh call.
     // We use it to detect "camera inside mesh" and to flip the back-face
@@ -1099,6 +1134,7 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     ST::Vector3 cameraToCenter = meshCenterWorld - m_eye;
     bool cameraInside = cameraToCenter.length() < boundingRadius;
 
+    const auto rasterStageStart = std::chrono::steady_clock::now();
     for (int i = 0; i + 2 < (int)idx.size(); i += 3) {
         ST::VertexOut v0 = (*transformedVertices)[idx[i + 0]];
         ST::VertexOut v1 = (*transformedVertices)[idx[i + 1]];
@@ -1160,6 +1196,8 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
             }
         }
     }
+    m_currentRasterStageMs += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - rasterStageStart).count();
 }
 
 void TestModule_3DRender::update(float deltaTime) {
@@ -1208,6 +1246,11 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     if (canvasW == 0 || canvasH == 0) return;
     m_inputCanvasW = canvasW;
     m_inputCanvasH = canvasH;
+    m_currentVertexStageMs = 0.0;
+    m_currentRasterStageMs = 0.0;
+    m_currentUploadStageMs = 0.0;
+    m_currentCacheHits = 0;
+    m_currentCacheMisses = 0;
 
     // Dense meshes are fill-rate bound in the software rasterizer. During a
     // camera drag, render a half-resolution preview and let SDL upscale it;
@@ -1216,7 +1259,8 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // rasterizer. Keep the explicit supersampling option, but adapt it to 1x
     // while the environment map is active so the viewport remains usable.
     const bool heavyPbr = m_environmentMapEnabled && m_environmentTexture.isValid();
-    const bool previewQuality = m_renderQuality == 1;
+    const bool previewQuality = m_renderQuality == 1 ||
+                                (m_renderQuality == 0 && m_adaptivePreview);
     const bool finalQuality = m_renderQuality == 2;
     const bool reducedQuality = previewQuality || (m_interactionActive && !finalQuality);
     const bool interactionPreview = m_interactionActive && !finalQuality;
@@ -1316,6 +1360,7 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     // Keep the upload staging buffer alive between frames. Camera drags can
     // trigger many renders per second, and repeatedly allocating a 640x480
     // pixel array adds avoidable allocator and cache churn.
+    const auto uploadStageStart = std::chrono::steady_clock::now();
     m_rgba32Buffer.resize(static_cast<size_t>(renderW) * static_cast<size_t>(renderH));
     for (int i = 0; i < renderW * renderH; ++i) {
         m_rgba32Buffer[static_cast<size_t>(i)] = packRGBA(pixels[i]);
@@ -1340,6 +1385,8 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
 
     SDL_UpdateTexture(m_outputTexture, nullptr, m_rgba32Buffer.data(), renderW * sizeof(uint32_t));
     SDL_RenderCopy(renderer, m_outputTexture, nullptr, nullptr);
+    m_currentUploadStageMs += std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - uploadStageStart).count();
     drawSelectionOutline(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawTransformGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
     drawLightGizmo(renderer, canvasW, canvasH, view, projection, selectedModelMatrix);
@@ -1347,6 +1394,12 @@ void TestModule_3DRender::render(void* canvasTexture, int canvasW, int canvasH) 
     m_frameTimeMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - frameStart).count();
     m_fps = m_frameTimeMs > 0.001 ? 1000.0 / m_frameTimeMs : 0.0;
+    m_lastVertexStageMs = m_currentVertexStageMs;
+    m_lastRasterStageMs = m_currentRasterStageMs;
+    m_lastUploadStageMs = m_currentUploadStageMs;
+    m_lastCacheHits = m_currentCacheHits;
+    m_lastCacheMisses = m_currentCacheMisses;
+    recordPerformanceSample(m_frameTimeMs);
 }
 
 bool TestModule_3DRender::renderControls() {
@@ -1378,6 +1431,29 @@ bool TestModule_3DRender::renderControls() {
         ImGui::BulletText("Shift = sprint, Wheel = change speed.");
     }
 
+    if (ImGui::CollapsingHeader("Performance")) {
+        const double averageFps = m_averageFrameTimeMs > 0.001
+            ? 1000.0 / m_averageFrameTimeMs : 0.0;
+        const double minimumFps = m_maxFrameTimeMs > 0.001
+            ? 1000.0 / m_maxFrameTimeMs : 0.0;
+        const double maximumFps = m_minFrameTimeMs > 0.001
+            ? 1000.0 / m_minFrameTimeMs : 0.0;
+        const int cacheSamples = m_lastCacheHits + m_lastCacheMisses;
+        const double cacheHitRate = cacheSamples > 0
+            ? 100.0 * static_cast<double>(m_lastCacheHits) / cacheSamples : 0.0;
+        ImGui::Text("Current: %.2f ms (%.1f FPS)", m_frameTimeMs, m_fps);
+        ImGui::Text("30-frame average: %.2f ms (%.1f FPS)",
+                    m_averageFrameTimeMs, averageFps);
+        ImGui::Text("Range: %.1f - %.1f FPS", minimumFps, maximumFps);
+        ImGui::Text("Stages: geometry %.2f ms | raster/PBR %.2f ms | upload %.2f ms",
+                    m_lastVertexStageMs, m_lastRasterStageMs, m_lastUploadStageMs);
+        ImGui::Text("Vertex cache: %d hits / %d misses (%.0f%% hit)",
+                    m_lastCacheHits, m_lastCacheMisses, cacheHitRate);
+        if (m_renderQuality == 0 && m_adaptivePreview) {
+            ImGui::TextDisabled("Adaptive preview active: last frame exceeded 30 FPS budget");
+        }
+    }
+
     if (ImGui::CollapsingHeader("Lighting (GGX PBR)", defaultOpen)) {
         changed |= ImGui::Checkbox("Enable lighting", &m_lightingEnabled);
         changed |= ImGui::Checkbox("Show light gizmo", &m_showLightGizmo);
@@ -1396,6 +1472,8 @@ bool TestModule_3DRender::renderControls() {
             ImGui::TextDisabled("Preview: 1x, reduced material sampling, no environment reflection");
         } else if (m_renderQuality == 2) {
             ImGui::TextDisabled("Final: full material sampling; supersampling follows the checkbox");
+        } else if (m_adaptivePreview) {
+            ImGui::TextDisabled("Adaptive preview active after a slow frame");
         } else if (m_environmentMapEnabled && m_environmentTexture.isValid() && m_supersampleEnabled) {
             ImGui::TextDisabled("Adaptive quality: 1x while environment map is enabled");
         }

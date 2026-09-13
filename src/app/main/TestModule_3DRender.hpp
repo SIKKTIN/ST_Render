@@ -20,6 +20,7 @@
 #include "core/math/Vector3.hpp"
 #include <SDL2/SDL.h>
 #include <memory>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -152,6 +153,7 @@ private:
     void focusSelectedSceneObject();
     void syncLightAnglesFromDirection();
     void updateLightDirectionFromAngles();
+    void recordPerformanceSample(double frameTimeMs);
     void markSceneDirty() { m_sceneDirty = true; }
 
     ST::FrameBuffer* m_frameBuffer;
@@ -169,6 +171,21 @@ private:
     int m_renderQuality = 0;
     double m_frameTimeMs = 0.0;
     double m_fps = 0.0;
+    double m_averageFrameTimeMs = 0.0;
+    double m_minFrameTimeMs = 0.0;
+    double m_maxFrameTimeMs = 0.0;
+    double m_lastVertexStageMs = 0.0;
+    double m_lastRasterStageMs = 0.0;
+    double m_lastUploadStageMs = 0.0;
+    double m_currentVertexStageMs = 0.0;
+    double m_currentRasterStageMs = 0.0;
+    double m_currentUploadStageMs = 0.0;
+    int m_lastCacheHits = 0;
+    int m_lastCacheMisses = 0;
+    int m_currentCacheHits = 0;
+    int m_currentCacheMisses = 0;
+    std::deque<double> m_frameTimeHistory;
+    bool m_adaptivePreview = false;
     bool m_environmentMapEnabled = true;
     ST::Image m_environmentTexture;
     std::string m_environmentTexturePath;
