@@ -18,9 +18,9 @@ ST_Render 是一个以 CPU 软件管线为核心的 C++ 渲染器实验项目。
 
 | 路径 | 内容 |
 | --- | --- |
-| `src/core` | 数学、相机、纹理和场景数据基础模块 |
+| `src/core` | 数学、相机和纹理等基础模块 |
 | `src/renderer` | 几何、资源加载、着色器、光栅化和渲染器 |
-| `src/engine/editor` | 场景对象、编辑器数据和辅助 UI |
+| `src/engine` | 场景对象、场景序列化、编辑器数据和辅助 UI |
 | `src/app/main` | SDL2/ImGui 测试管理器与离屏诊断入口 |
 | `Data/Models` | OBJ 模型和模型纹理 |
 | `Data/M1911` | M1911 FBX 模型及 PBR 贴图 |

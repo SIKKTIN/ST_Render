@@ -27,7 +27,7 @@
 ## CMake 目标
 
 源码按 src/core、src/renderer、src/engine、src/app 组织。
-构建目标包括 Math、Camera、Texture、Buffer、Geometry、Transform、Pipeline、Renderer、Editor、DataBase，以及 ST_Render_Manager、ST_Render_Dump。
+构建目标包括 Math、Camera、Texture、Buffer、Geometry、Transform、Shader、Pipeline、Renderer、Editor、DataBase，以及 ST_Render_Manager、ST_Render_Dump。
 
 Manager 链接编辑器和渲染库；Dump 仅使用渲染相关库。Editor 的静态脚本注册通过 /WHOLEARCHIVE 保留。
 

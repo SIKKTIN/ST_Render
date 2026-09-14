@@ -9,8 +9,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# vcpkg 集成
-set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain")
+# vcpkg is selected by CMakePresets.json or by -DCMAKE_TOOLCHAIN_FILE.
+# When VCPKG_ROOT is available, use it as a convenient command-line default.
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        CACHE FILEPATH "Vcpkg toolchain")
+endif()
 
 # SDL2 依赖
 find_package(SDL2 CONFIG REQUIRED)

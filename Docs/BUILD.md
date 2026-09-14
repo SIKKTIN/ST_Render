@@ -57,7 +57,7 @@ Dump 在无窗口环境中执行 3D 渲染，输出每个视角的像素统计�
 & ./build/debug/bin/Debug/ST_Render_Dump.exe --yaw=0.5 --out=build/cube.ppm
 ```
 
-构建会将 Resource/ 和 Data/ScenePrefab/ 放在主程序旁边，并复制所需 SDL2 DLL（Debug 通常为 SDL2d.dll）。场景数据应保留，不能把整个 Data/ 当作无用资源删除。
+构建会将 Resource/ 和完整的 Data/ 目录放在主程序旁边，并复制所需 SDL2 DLL（Debug 通常为 SDL2d.dll）。场景数据应保留，不能把 Data/ 当作无用资源删除。
 
 ## 旧缓存
 

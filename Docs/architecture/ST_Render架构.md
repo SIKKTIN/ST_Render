@@ -9,12 +9,12 @@ ST_Render 是 C++17 CPU 软件渲染器，配有用于观察渲染结果和修�
 | src/core/math | 向量、矩阵、颜色和数学工具 |
 | src/core/camera | 透视与正交相机 |
 | src/core/texture | 图像解码 |
-| src/core/data | 场景序列化 |
+| src/engine/data | 场景序列化 |
 | src/renderer | 几何、变换、顶点处理、光栅化、着色和缓冲区 |
 | src/engine/editor | 场景对象、纹理管理、脚本和编辑器 UI |
 | src/app | 应用入口、渲染示例和 Review 测试 |
 
-场景数据位于 Data/ScenePrefab，纹理位于 Resource。SceneData 当前依赖编辑器的 Scene/GameObject 类型，core 目录并非完全无上层依赖。
+场景数据位于 Data/ScenePrefab，纹理位于 Resource。SceneData 位于 engine/data，并依赖编辑器的 Scene/GameObject 类型。
 
 ## 渲染流程
 

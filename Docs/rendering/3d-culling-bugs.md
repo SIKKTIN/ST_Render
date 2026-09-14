@@ -318,7 +318,7 @@ if (visibilityDot <= 0.0f) continue;
 
 ### 新增的离线工具
 
-`src/app/main/test_3d_dump.cpp`（target `ST_Render_Dump`）：
+`src/tools/render_dump/test_3d_dump.cpp`（target `ST_Render_Dump`）：
 
 - `--sweep --sweep-n=N`：从 yaw=0 扫到 yaw=2π，每隔 2π/N 取一个角度，跑 cube 渲染，打印每帧 cube 像素数 + 屏幕 bbox + 屏幕中心。
 - `--yaw=... --out=path.ppm`：单帧渲染，存为 PPM，方便离线看 image 工具检查。
@@ -332,8 +332,8 @@ if (visibilityDot <= 0.0f) continue;
 | `src/renderer/pipeline/VertexShader.hpp` | 新增 `lerpVertexOut` + `clipTriangleAgainstNearPlane` |
 | `src/renderer/geometry/Mesh.cpp` | `Mesh::createCube` 12 个 face indices 改为 CCW from outside |
 | `src/app/main/TestModule_3DRender.cpp::drawMesh` | trivial-reject 改为"全外才剔"；back-face culling 之后调 near-plane clipper；每个 clip 子三角形单独 rasterize |
-| `src/app/main/CMakeLists.txt` | 新增 `ST_Render_Dump` 离线诊断 target |
-| `src/app/main/test_3d_dump.cpp` | 新增离线 dump + sweep 工具 |
+| `src/tools/render_dump/CMakeLists.txt` | 定义 `ST_Render_Dump` 离线诊断 target |
+| `src/tools/render_dump/test_3d_dump.cpp` | 离线 dump + sweep 工具 |
 | `docs/rendering/3d-culling-bugs.md` | 本节新增 |
 
 ---

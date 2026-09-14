@@ -6,10 +6,8 @@
 #   src/engine/     - 编辑器运行时（GameObject、Scene、UI...）
 #   src/app/        - 主程序入口 + 测试
 
-# 为所有 src/ 子目录暴露公共 include 路径（"core/math/Vector3.hpp"）
-include_directories(${CMAKE_SOURCE_DIR}/src)
-
 add_subdirectory(core)
 add_subdirectory(renderer)
 add_subdirectory(engine)
 add_subdirectory(app)
+add_subdirectory(tools)

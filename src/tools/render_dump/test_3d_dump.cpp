@@ -8,8 +8,8 @@
 //     screen center of mass)
 //   - PPM image of the first frame written to --out (default build/dump.ppm)
 //
-// Compile is wired through src/app/main/CMakeLists.txt; the dump target links
-// the same libraries as ST_Render_Manager minus ImGui / SDL2 main.
+// Compile is wired through src/tools/render_dump/CMakeLists.txt; the dump
+// target links the same renderer libraries as ST_Render_Manager minus ImGui.
 
 #include <algorithm>
 #include <cmath>

@@ -111,6 +111,17 @@ output.ppm
 *.unsuccessful
 *.VC.db
 *.VC.opendb
+
+# ---------- Python tooling ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------- Local diagnostics ----------
+*.trace.log
+*_shader_trace.log
+diagnostics/
 ipch/
 [Dd]ebug/
 [Dd]ebug-*/

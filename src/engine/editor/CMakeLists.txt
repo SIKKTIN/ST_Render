@@ -1,4 +1,6 @@
-file(GLOB ST_SCRIPTS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/*.cpp")
+file(GLOB ST_SCRIPTS_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Scripts/*.cpp"
+)
 
 add_library(Editor
     GameObject.cpp

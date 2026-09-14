@@ -1,2 +1,1 @@
-# src/core/data/CMakeLists.txt - Data management
-add_subdirectory(DataBase)
+# Core data types remain independent from editor/runtime code.
