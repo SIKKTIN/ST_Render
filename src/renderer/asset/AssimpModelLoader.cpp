@@ -159,6 +159,8 @@ bool AssimpModelLoader::load(const std::string& path,
                     ? -1.0f : 1.0f;
             }
             if (source->HasTextureCoords(0)) {
+                // M1911 textures are loaded with their source orientation
+                // preserved, so keep the FBX UVs unchanged.
                 vertex.texCoord = Vector2(source->mTextureCoords[0][vertexIndex].x,
                                           source->mTextureCoords[0][vertexIndex].y);
             }

@@ -140,7 +140,9 @@ bool ObjModelLoader::load(const std::string& path, ModelAsset& asset, std::strin
 
         Vertex vertex;
         vertex.position = positions[positionIndex];
-        vertex.texCoord = source.texCoord == 0 ? Vector2::zero() : texCoords[texCoordIndex];
+        vertex.texCoord = source.texCoord == 0
+            ? Vector2::zero()
+            : Vector2(texCoords[texCoordIndex].x, 1.0f - texCoords[texCoordIndex].y);
         vertex.normal = source.normal == 0 ? Vector3::zero() : normals[normalIndex];
         vertex.color = Color::white();
         outputIndex = part.mesh.getVertexCount();

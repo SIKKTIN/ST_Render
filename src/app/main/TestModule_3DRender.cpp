@@ -1352,8 +1352,8 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
     meshCenter = meshCenter * (1.0f / std::max(1, (int)verts.size()));
     ST::Vector3 meshCenterWorld = (model * ST::Vector4(meshCenter, 1.0f)).toVector3();
     float boundingRadius = 0.0f;
-    for (const auto& v : verts) {
-        float d = (v.position - meshCenter).length();
+    for (const auto& v : *transformedVertices) {
+        const float d = (v.worldPosition - meshCenterWorld).length();
         if (d > boundingRadius) boundingRadius = d;
     }
     ST::Vector3 cameraToCenter = meshCenterWorld - m_eye;
@@ -1393,7 +1393,7 @@ void TestModule_3DRender::drawMesh(const ST::Mesh& mesh,
                               const ST::VertexOut& c) {
             auto frag = [this, shader, &shaderContext, faceNormal, cameraInside, useFlatShading](const ST::VertexOut& f) {
                 if (shader != m_builtinShader) return shader->fragment(f, shaderContext);
-                if (!m_lightingEnabled) return f.color;
+                if (!m_lightingEnabled) return m_fragmentShader.sampleTexture(f.texCoord);
 
                 // Smooth mode keeps the perspective-correct interpolated
                 // vertex normal produced by Rasterizer. Flat mode replaces it
